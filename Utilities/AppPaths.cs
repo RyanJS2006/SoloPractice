@@ -31,7 +31,7 @@ internal static class AppPaths
     public static string DatabasePath =>
         Path.Combine(
             ApplicationDirectory,
-            "accounting.db");
+            "SoloPractice.db");
 
     public static string DefaultWorkbookPath =>
         Path.Combine(
