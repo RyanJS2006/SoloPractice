@@ -252,27 +252,6 @@ Chase####_Activity_YYYYMMDD (1).csv
 
 The account identifier and download date are derived from this filename.
 
-## Development Status
-
-SoloPractice is currently an early-stage personal project.
-
-| Component                              | Status        |
-| -------------------------------------- | ------------- |
-| SQLite database                        | ✅ Implemented |
-| Database schema                        | ✅ Implemented |
-| Chase credit-card CSV import           | ✅ Implemented |
-| Chase deposit-account CSV import       | ✅ Implemented |
-| Duplicate file detection               | ✅ Implemented |
-| Overlapping transaction deduplication  | ✅ Implemented |
-| Structured deposit-description parsing | ✅ Implemented |
-| Unknown-description preservation       | ✅ Implemented |
-| Responsive CLI                         | ✅ Implemented |
-| Accounting worksheet generation        | 🚧 Planned    |
-| Worksheet synchronization              | 🚧 Planned    |
-| Receipt organization                   | 🚧 Planned    |
-| Insurance/tax document organization    | 🚧 Planned    |
-| About page                             | 🚧 Planned    |
-
 ## Disclaimer
 
 SoloPractice is an independent personal project and is **not affiliated with, endorsed by, or supported by JPMorgan Chase & Co.**
