@@ -13,4 +13,9 @@
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.11" />
   </ItemGroup>
 
+  <ItemGroup>
+    <EmbeddedResource Include="Data\schema.sql" />
+    <Compile Remove="Tests\**\*.cs" />
+  </ItemGroup>
+
 </Project>
