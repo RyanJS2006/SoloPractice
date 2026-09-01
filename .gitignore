@@ -361,3 +361,43 @@ MigrationBackup/
 
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
+
+
+# ============================================================
+# SoloPractice
+# ============================================================
+
+# Local SQLite databases
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+
+# Chase downloads / financial source data
+Chase*_Activity_*.csv
+
+# Generated accounting workbooks
+*Accounting Worksheet*.xlsx
+*Accounting Worksheet*.xlsm
+
+# Microsoft Office temporary files
+~$*.xlsx
+~$*.xlsm
+~$*.docx
+
+# Local configuration / secrets
+.env
+.env.*
+!.env.example
+
+# OS metadata
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# JetBrains Rider / IntelliJ
+.idea/
+
+# VS Code workspace settings
+.vscode/
