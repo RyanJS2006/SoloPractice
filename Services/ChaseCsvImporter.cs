@@ -174,7 +174,7 @@ internal static class ChaseCsvImporter
             EnsureDate(connection, transaction, fileIdentity.DownloadDateUnixSeconds);
             EnsureImportFormat(connection, transaction, format.Name);
 
-            InsertImportFile(
+            long importFileId = InsertImportFile(
                 connection,
                 transaction,
                 fileSha256,
@@ -253,7 +253,7 @@ internal static class ChaseCsvImporter
                 InsertImportRow(
                     connection,
                     transaction,
-                    fileSha256,
+                    importFileId,
                     sourceRowNumber,
                     transactionId);
 
@@ -833,13 +833,13 @@ internal static class ChaseCsvImporter
                 FROM Transactions t
                 JOIN CreditCardTransactions c
                   ON c.TransactionId = t.Id
-                WHERE t.AccountLast4 = $account
-                  AND t.PostingDateUnixSeconds = $postingDate
-                  AND t.AmountCents = $amount
-                  AND t.TypeCode = $type
-                  AND c.TransactionDateUnixSeconds = $transactionDate
-                  AND c.MerchantName = $merchant
-                  AND c.CategoryName IS $category
+                WHERE t.AccountId = (SELECT Id FROM Accounts WHERE Last4 = $account)
+                  AND t.PostingDateId = (SELECT Id FROM DateValues WHERE UnixSeconds = $postingDate)
+                  AND t.AmountId = (SELECT Id FROM MoneyValues WHERE Cents = $amount)
+                  AND t.TypeId = (SELECT Id FROM TransactionTypes WHERE Code = $type)
+                  AND c.TransactionDateId = (SELECT Id FROM DateValues WHERE UnixSeconds = $transactionDate)
+                  AND c.MerchantId = (SELECT Id FROM CreditCardMerchants WHERE Name = $merchant)
+                  AND c.CategoryId IS (SELECT Id FROM CreditCardCategories WHERE Name = $category)
                   AND c.Memo IS $memo
                 ORDER BY t.Id;
                 """;
@@ -970,18 +970,18 @@ internal static class ChaseCsvImporter
               ON ii.Id = a.IndividualIdentifierId
             LEFT JOIN AchIndividualNames nm
               ON nm.Id = a.IndividualNameId
-            LEFT JOIN AchPaymentRelatedInformation pi
+            LEFT JOIN AchPaymentRelatedInformationExpanded pi
               ON pi.Id = a.PaymentRelatedInformationId
             LEFT JOIN AchBankReferenceKinds brk
               ON brk.Id = a.BankReferenceKindId
             LEFT JOIN AchBankReferences br
               ON br.Id = a.BankReferenceId
-            WHERE t.AccountLast4 = $account
-              AND t.PostingDateUnixSeconds = $postingDate
-              AND t.AmountCents = $amount
-              AND t.TypeCode = $type
-              AND d.DetailsCode = $details
-              AND d.BalanceCents IS $balance
+            WHERE t.AccountId = (SELECT Id FROM Accounts WHERE Last4 = $account)
+              AND t.PostingDateId = (SELECT Id FROM DateValues WHERE UnixSeconds = $postingDate)
+              AND t.AmountId = (SELECT Id FROM MoneyValues WHERE Cents = $amount)
+              AND t.TypeId = (SELECT Id FROM TransactionTypes WHERE Code = $type)
+              AND d.DetailsId = (SELECT Id FROM DepositDetails WHERE Code = $details)
+              AND d.BalanceAmountId IS (SELECT Id FROM MoneyValues WHERE Cents = $balance)
               AND d.CheckOrSlipNumber IS $check
               AND o.CompanyId = $companyId
               AND o.CompanyName = $companyName
@@ -989,7 +989,7 @@ internal static class ChaseCsvImporter
               AND ed.Description = $entryDescription
               AND sc.Code = $secCode
               AND tn.TraceNumber IS $trace
-              AND a.EffectiveEntryDateUnixSeconds IS $eed
+              AND a.EffectiveEntryDateId IS (SELECT Id FROM DateValues WHERE UnixSeconds = $eed)
               AND ii.IndividualId IS $individualId
               AND nm.Name IS $individualName
               AND pi.Information IS $paymentInfo
@@ -1058,12 +1058,12 @@ internal static class ChaseCsvImporter
               ON dir.Id = x.DirectionId
             JOIN TransferCounterparties c
               ON c.Id = x.CounterpartyId
-            WHERE t.AccountLast4 = $account
-              AND t.PostingDateUnixSeconds = $postingDate
-              AND t.AmountCents = $amount
-              AND t.TypeCode = $type
-              AND d.DetailsCode = $details
-              AND d.BalanceCents IS $balance
+            WHERE t.AccountId = (SELECT Id FROM Accounts WHERE Last4 = $account)
+              AND t.PostingDateId = (SELECT Id FROM DateValues WHERE UnixSeconds = $postingDate)
+              AND t.AmountId = (SELECT Id FROM MoneyValues WHERE Cents = $amount)
+              AND t.TypeId = (SELECT Id FROM TransactionTypes WHERE Code = $type)
+              AND d.DetailsId = (SELECT Id FROM DepositDetails WHERE Code = $details)
+              AND d.BalanceAmountId IS (SELECT Id FROM MoneyValues WHERE Cents = $balance)
               AND d.CheckOrSlipNumber IS $check
               AND dir.Name = $direction
               AND x.IsRealtime = $isRealtime
@@ -1116,14 +1116,14 @@ internal static class ChaseCsvImporter
               ON d.TransactionId = t.Id
             JOIN ChaseCardPayments p
               ON p.TransactionId = t.Id
-            WHERE t.AccountLast4 = $account
-              AND t.PostingDateUnixSeconds = $postingDate
-              AND t.AmountCents = $amount
-              AND t.TypeCode = $type
-              AND d.DetailsCode = $details
-              AND d.BalanceCents IS $balance
+            WHERE t.AccountId = (SELECT Id FROM Accounts WHERE Last4 = $account)
+              AND t.PostingDateId = (SELECT Id FROM DateValues WHERE UnixSeconds = $postingDate)
+              AND t.AmountId = (SELECT Id FROM MoneyValues WHERE Cents = $amount)
+              AND t.TypeId = (SELECT Id FROM TransactionTypes WHERE Code = $type)
+              AND d.DetailsId = (SELECT Id FROM DepositDetails WHERE Code = $details)
+              AND d.BalanceAmountId IS (SELECT Id FROM MoneyValues WHERE Cents = $balance)
               AND d.CheckOrSlipNumber IS $check
-              AND p.TargetCardLast4 = $targetCard
+              AND p.TargetAccountId = (SELECT Id FROM Accounts WHERE Last4 = $targetCard)
             ORDER BY t.Id;
             """;
 
@@ -1151,12 +1151,12 @@ internal static class ChaseCsvImporter
               ON d.TransactionId = t.Id
             JOIN DebitCardTransactions c
               ON c.TransactionId = t.Id
-            WHERE t.AccountLast4 = $account
-              AND t.PostingDateUnixSeconds = $postingDate
-              AND t.AmountCents = $amount
-              AND t.TypeCode = $type
-              AND d.DetailsCode = $details
-              AND d.BalanceCents IS $balance
+            WHERE t.AccountId = (SELECT Id FROM Accounts WHERE Last4 = $account)
+              AND t.PostingDateId = (SELECT Id FROM DateValues WHERE UnixSeconds = $postingDate)
+              AND t.AmountId = (SELECT Id FROM MoneyValues WHERE Cents = $amount)
+              AND t.TypeId = (SELECT Id FROM TransactionTypes WHERE Code = $type)
+              AND d.DetailsId = (SELECT Id FROM DepositDetails WHERE Code = $details)
+              AND d.BalanceAmountId IS (SELECT Id FROM MoneyValues WHERE Cents = $balance)
               AND d.CheckOrSlipNumber IS $check
               AND c.MerchantDescriptor = $merchant
             ORDER BY t.Id;
@@ -1186,12 +1186,12 @@ internal static class ChaseCsvImporter
               ON d.TransactionId = t.Id
             JOIN AtmTransactions a
               ON a.TransactionId = t.Id
-            WHERE t.AccountLast4 = $account
-              AND t.PostingDateUnixSeconds = $postingDate
-              AND t.AmountCents = $amount
-              AND t.TypeCode = $type
-              AND d.DetailsCode = $details
-              AND d.BalanceCents IS $balance
+            WHERE t.AccountId = (SELECT Id FROM Accounts WHERE Last4 = $account)
+              AND t.PostingDateId = (SELECT Id FROM DateValues WHERE UnixSeconds = $postingDate)
+              AND t.AmountId = (SELECT Id FROM MoneyValues WHERE Cents = $amount)
+              AND t.TypeId = (SELECT Id FROM TransactionTypes WHERE Code = $type)
+              AND d.DetailsId = (SELECT Id FROM DepositDetails WHERE Code = $details)
+              AND d.BalanceAmountId IS (SELECT Id FROM MoneyValues WHERE Cents = $balance)
               AND d.CheckOrSlipNumber IS $check
               AND a.Action = $action
               AND a.TerminalId IS $terminal
@@ -1223,12 +1223,12 @@ internal static class ChaseCsvImporter
               ON d.TransactionId = t.Id
             JOIN FeeTransactions f
               ON f.TransactionId = t.Id
-            WHERE t.AccountLast4 = $account
-              AND t.PostingDateUnixSeconds = $postingDate
-              AND t.AmountCents = $amount
-              AND t.TypeCode = $type
-              AND d.DetailsCode = $details
-              AND d.BalanceCents IS $balance
+            WHERE t.AccountId = (SELECT Id FROM Accounts WHERE Last4 = $account)
+              AND t.PostingDateId = (SELECT Id FROM DateValues WHERE UnixSeconds = $postingDate)
+              AND t.AmountId = (SELECT Id FROM MoneyValues WHERE Cents = $amount)
+              AND t.TypeId = (SELECT Id FROM TransactionTypes WHERE Code = $type)
+              AND d.DetailsId = (SELECT Id FROM DepositDetails WHERE Code = $details)
+              AND d.BalanceAmountId IS (SELECT Id FROM MoneyValues WHERE Cents = $balance)
               AND d.CheckOrSlipNumber IS $check
               AND f.Description = $description
             ORDER BY t.Id;
@@ -1258,12 +1258,12 @@ internal static class ChaseCsvImporter
               ON d.TransactionId = t.Id
             JOIN RealTimePayments r
               ON r.TransactionId = t.Id
-            WHERE t.AccountLast4 = $account
-              AND t.PostingDateUnixSeconds = $postingDate
-              AND t.AmountCents = $amount
-              AND t.TypeCode = $type
-              AND d.DetailsCode = $details
-              AND d.BalanceCents IS $balance
+            WHERE t.AccountId = (SELECT Id FROM Accounts WHERE Last4 = $account)
+              AND t.PostingDateId = (SELECT Id FROM DateValues WHERE UnixSeconds = $postingDate)
+              AND t.AmountId = (SELECT Id FROM MoneyValues WHERE Cents = $amount)
+              AND t.TypeId = (SELECT Id FROM TransactionTypes WHERE Code = $type)
+              AND d.DetailsId = (SELECT Id FROM DepositDetails WHERE Code = $details)
+              AND d.BalanceAmountId IS (SELECT Id FROM MoneyValues WHERE Cents = $balance)
               AND d.CheckOrSlipNumber IS $check
               AND r.AbaRoutingNumber = $aba
               AND r.Sender = $sender
@@ -1326,12 +1326,12 @@ internal static class ChaseCsvImporter
               ON d.TransactionId = t.Id
             JOIN UnparsedDepositDescriptions u
               ON u.TransactionId = t.Id
-            WHERE t.AccountLast4 = $account
-              AND t.PostingDateUnixSeconds = $postingDate
-              AND t.AmountCents = $amount
-              AND t.TypeCode = $type
-              AND d.DetailsCode = $details
-              AND d.BalanceCents IS $balance
+            WHERE t.AccountId = (SELECT Id FROM Accounts WHERE Last4 = $account)
+              AND t.PostingDateId = (SELECT Id FROM DateValues WHERE UnixSeconds = $postingDate)
+              AND t.AmountId = (SELECT Id FROM MoneyValues WHERE Cents = $amount)
+              AND t.TypeId = (SELECT Id FROM TransactionTypes WHERE Code = $type)
+              AND d.DetailsId = (SELECT Id FROM DepositDetails WHERE Code = $details)
+              AND d.BalanceAmountId IS (SELECT Id FROM MoneyValues WHERE Cents = $balance)
               AND d.CheckOrSlipNumber IS $check
               AND u.Description = $description
             ORDER BY t.Id;
@@ -1358,12 +1358,12 @@ internal static class ChaseCsvImporter
             FROM Transactions t
             JOIN DepositTransactions d
               ON d.TransactionId = t.Id
-            WHERE t.AccountLast4 = $account
-              AND t.PostingDateUnixSeconds = $postingDate
-              AND t.AmountCents = $amount
-              AND t.TypeCode = $type
-              AND d.DetailsCode = $details
-              AND d.BalanceCents IS $balance
+            WHERE t.AccountId = (SELECT Id FROM Accounts WHERE Last4 = $account)
+              AND t.PostingDateId = (SELECT Id FROM DateValues WHERE UnixSeconds = $postingDate)
+              AND t.AmountId = (SELECT Id FROM MoneyValues WHERE Cents = $amount)
+              AND t.TypeId = (SELECT Id FROM TransactionTypes WHERE Code = $type)
+              AND d.DetailsId = (SELECT Id FROM DepositDetails WHERE Code = $details)
+              AND d.BalanceAmountId IS (SELECT Id FROM MoneyValues WHERE Cents = $balance)
               AND d.CheckOrSlipNumber IS $check
               AND NOT EXISTS
               (
@@ -1449,17 +1449,17 @@ internal static class ChaseCsvImporter
             command.CommandText = """
                 INSERT INTO Transactions
                 (
-                    AccountLast4,
-                    PostingDateUnixSeconds,
-                    AmountCents,
-                    TypeCode
+                    AccountId,
+                    PostingDateId,
+                    AmountId,
+                    TypeId
                 )
                 VALUES
                 (
-                    $account,
-                    $postingDate,
-                    $amount,
-                    $type
+                    (SELECT Id FROM Accounts WHERE Last4 = $account),
+                    (SELECT Id FROM DateValues WHERE UnixSeconds = $postingDate),
+                    (SELECT Id FROM MoneyValues WHERE Cents = $amount),
+                    (SELECT Id FROM TransactionTypes WHERE Code = $type)
                 );
 
                 SELECT last_insert_rowid();
@@ -1606,17 +1606,17 @@ internal static class ChaseCsvImporter
             INSERT INTO CreditCardTransactions
             (
                 TransactionId,
-                TransactionDateUnixSeconds,
-                MerchantName,
-                CategoryName,
+                TransactionDateId,
+                MerchantId,
+                CategoryId,
                 Memo
             )
             VALUES
             (
                 $transactionId,
-                $transactionDate,
-                $merchant,
-                $category,
+                (SELECT Id FROM DateValues WHERE UnixSeconds = $transactionDate),
+                (SELECT Id FROM CreditCardMerchants WHERE Name = $merchant),
+                (SELECT Id FROM CreditCardCategories WHERE Name = $category),
                 $memo
             );
             """;
@@ -1667,15 +1667,15 @@ internal static class ChaseCsvImporter
             INSERT INTO DepositTransactions
             (
                 TransactionId,
-                DetailsCode,
-                BalanceCents,
+                DetailsId,
+                BalanceAmountId,
                 CheckOrSlipNumber
             )
             VALUES
             (
                 $transactionId,
-                $details,
-                $balance,
+                (SELECT Id FROM DepositDetails WHERE Code = $details),
+                (SELECT Id FROM MoneyValues WHERE Cents = $balance),
                 $check
             );
             """;
@@ -1745,12 +1745,11 @@ internal static class ChaseCsvImporter
             "Name",
             ach.IndividualName);
 
-        long? paymentRelatedInformationId = GetOrCreateNullableTextLookupId(
-            connection,
-            transaction,
-            "AchPaymentRelatedInformation",
-            "Information",
-            ach.PaymentRelatedInformation);
+        long? paymentRelatedInformationId =
+            GetOrCreateNullableAchPaymentInformationId(
+                connection,
+                transaction,
+                ach.PaymentRelatedInformation);
 
         long? bankReferenceKindId = GetOrCreateNullableTextLookupId(
             connection,
@@ -1786,7 +1785,7 @@ internal static class ChaseCsvImporter
                 EntryDescriptionId,
                 SecCodeId,
                 TraceNumberId,
-                EffectiveEntryDateUnixSeconds,
+                EffectiveEntryDateId,
                 IndividualIdentifierId,
                 IndividualNameId,
                 PaymentRelatedInformationId,
@@ -1801,7 +1800,7 @@ internal static class ChaseCsvImporter
                 $entryDescriptionId,
                 $secCodeId,
                 $traceNumberId,
-                $eed,
+                (SELECT Id FROM DateValues WHERE UnixSeconds = $eed),
                 $individualIdentifierId,
                 $individualNameId,
                 $paymentInfoId,
@@ -1943,12 +1942,12 @@ internal static class ChaseCsvImporter
             INSERT INTO ChaseCardPayments
             (
                 TransactionId,
-                TargetCardLast4
+                TargetAccountId
             )
             VALUES
             (
                 $transactionId,
-                $targetCard
+                (SELECT Id FROM Accounts WHERE Last4 = $targetCard)
             );
             """;
 
@@ -2211,7 +2210,7 @@ internal static class ChaseCsvImporter
             CultureInfo.InvariantCulture) != 0;
     }
 
-    private static void InsertImportFile(
+    private static long InsertImportFile(
         SqliteConnection connection,
         SqliteTransaction transaction,
         byte[] fileSha256,
@@ -2226,19 +2225,21 @@ internal static class ChaseCsvImporter
             INSERT INTO ImportFiles
             (
                 FileSha256,
-                AccountLast4,
-                FormatName,
-                DownloadDateUnixSeconds,
-                ImportedAtUnixSeconds
+                AccountId,
+                FormatId,
+                DownloadDateId,
+                ImportedAtUtc
             )
             VALUES
             (
                 $sha256,
-                $account,
-                $format,
-                $downloadDate,
+                (SELECT Id FROM Accounts WHERE Last4 = $account),
+                (SELECT Id FROM ImportFormats WHERE Name = $format),
+                (SELECT Id FROM DateValues WHERE UnixSeconds = $downloadDate),
                 $importedAt
             );
+
+            SELECT last_insert_rowid();
             """;
 
         command.Parameters.AddWithValue(
@@ -2255,15 +2256,19 @@ internal static class ChaseCsvImporter
             downloadDateUnixSeconds);
         command.Parameters.AddWithValue(
             "$importedAt",
-            DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+            DateTimeOffset.UtcNow.ToString(
+                "O",
+                CultureInfo.InvariantCulture));
 
-        command.ExecuteNonQuery();
+        return Convert.ToInt64(
+            command.ExecuteScalar(),
+            CultureInfo.InvariantCulture);
     }
 
     private static void InsertImportRow(
         SqliteConnection connection,
         SqliteTransaction transaction,
-        byte[] fileSha256,
+        long importFileId,
         int sourceRowNumber,
         long transactionId)
     {
@@ -2273,21 +2278,21 @@ internal static class ChaseCsvImporter
         command.CommandText = """
             INSERT INTO ImportRows
             (
-                ImportFileSha256,
+                ImportFileId,
                 SourceRowNumber,
                 TransactionId
             )
             VALUES
             (
-                $sha256,
+                $importFileId,
                 $sourceRowNumber,
                 $transactionId
             );
             """;
 
         command.Parameters.AddWithValue(
-            "$sha256",
-            fileSha256);
+            "$importFileId",
+            importFileId);
         command.Parameters.AddWithValue(
             "$sourceRowNumber",
             sourceRowNumber);
@@ -2391,6 +2396,266 @@ internal static class ChaseCsvImporter
 
         command.Parameters.AddWithValue("$value", value);
         command.ExecuteNonQuery();
+    }
+
+    private static long? GetOrCreateNullableAchPaymentInformationId(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        string? information)
+    {
+        if (information is null)
+            return null;
+
+        (int formatId, string payload) =
+            EncodeAchPaymentInformation(information);
+
+        using (var select = connection.CreateCommand())
+        {
+            select.Transaction = transaction;
+            select.CommandText = """
+                SELECT Id
+                FROM AchPaymentRelatedInformation
+                WHERE FormatId = $formatId
+                  AND Payload = $payload;
+                """;
+
+            select.Parameters.AddWithValue("$formatId", formatId);
+            select.Parameters.AddWithValue("$payload", payload);
+
+            object? existing = select.ExecuteScalar();
+
+            if (existing is not null)
+            {
+                return Convert.ToInt64(
+                    existing,
+                    CultureInfo.InvariantCulture);
+            }
+        }
+
+        using var insert = connection.CreateCommand();
+        insert.Transaction = transaction;
+        insert.CommandText = """
+            INSERT INTO AchPaymentRelatedInformation
+                (FormatId, Payload)
+            VALUES
+                ($formatId, $payload);
+
+            SELECT last_insert_rowid();
+            """;
+
+        insert.Parameters.AddWithValue("$formatId", formatId);
+        insert.Parameters.AddWithValue("$payload", payload);
+
+        return Convert.ToInt64(
+            insert.ExecuteScalar(),
+            CultureInfo.InvariantCulture);
+    }
+
+    private static (int FormatId, string Payload)
+        EncodeAchPaymentInformation(string information)
+    {
+        const string trnPrefix = "TRN*1*";
+
+        if (TryEncodeDerivedCpPaymentInformation(
+                information,
+                out string cpPayload))
+        {
+            return (5, cpPayload);
+        }
+
+        if (TryStripAchPaymentTemplate(
+                information,
+                trnPrefix,
+                "*1411289245*0000877 26\\",
+                out string payload))
+        {
+            return (1, payload);
+        }
+
+        if (TryStripAchPaymentTemplate(
+                information,
+                trnPrefix,
+                "*1411289245*000087726 \\",
+                out payload))
+        {
+            return (2, payload);
+        }
+
+        if (TryStripAchPaymentTemplate(
+                information,
+                trnPrefix,
+                "*1411648670\\",
+                out payload))
+        {
+            return (3, payload);
+        }
+
+        if (TryStripAchPaymentTemplate(
+                information,
+                trnPrefix,
+                "*1066033492\\",
+                out payload))
+        {
+            return (4, payload);
+        }
+
+        if (TryStripAchPaymentTemplate(
+                information,
+                trnPrefix,
+                "*1341858379\\",
+                out payload))
+        {
+            return (6, payload);
+        }
+
+        if (TryStripAchPaymentTemplate(
+                information,
+                trnPrefix,
+                "*1364004756*36 4004756~                                      0",
+                out payload))
+        {
+            return (7, payload);
+        }
+
+        if (TryStripAchPaymentTemplate(
+                information,
+                trnPrefix,
+                "*139 1995276*0000UMR01\\",
+                out payload))
+        {
+            return (8, payload);
+        }
+
+        if (TryStripAchPaymentTemplate(
+                information,
+                trnPrefix,
+                "*1860507074*0 000UHCEX\\",
+                out payload))
+        {
+            return (9, payload);
+        }
+
+        if (TryStripAchPaymentTemplate(
+                information,
+                trnPrefix,
+                "*1591031071~                                                    HCCLAIMPMT",
+                out payload))
+        {
+            return (10, payload);
+        }
+
+        if (TryStripAchPaymentTemplate(
+                information,
+                "TXP*337743360SOLE*012*20261231*T*",
+                "\\",
+                out payload))
+        {
+            return (11, payload);
+        }
+
+        // Unknown future Chase addenda remain lossless. They are simply stored
+        // verbatim using the RAW format until a repeated structure is worth
+        // assigning its own compact format ID.
+        return (12, information);
+    }
+
+    private static bool TryStripAchPaymentTemplate(
+        string information,
+        string prefix,
+        string suffix,
+        out string payload)
+    {
+        if (!information.StartsWith(prefix, StringComparison.Ordinal) ||
+            !information.EndsWith(suffix, StringComparison.Ordinal) ||
+            information.Length < prefix.Length + suffix.Length)
+        {
+            payload = string.Empty;
+            return false;
+        }
+
+        payload = information.Substring(
+            prefix.Length,
+            information.Length - prefix.Length - suffix.Length);
+
+        return true;
+    }
+
+    private static bool TryEncodeDerivedCpPaymentInformation(
+        string information,
+        out string payload)
+    {
+        const string prefix = "TRN*1*";
+        const string marker = "*1361236610*CP ";
+        const string suffix = "-1376879510\\";
+
+        payload = string.Empty;
+
+        if (!information.StartsWith(prefix, StringComparison.Ordinal) ||
+            !information.EndsWith(suffix, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        int markerIndex = information.IndexOf(
+            marker,
+            prefix.Length,
+            StringComparison.Ordinal);
+
+        if (markerIndex < prefix.Length)
+            return false;
+
+        string candidate = information.Substring(
+            prefix.Length,
+            markerIndex - prefix.Length);
+
+        // The compact CP form is only used when the entire original string can
+        // be deterministically reconstructed from the reference.
+        if (candidate.Length < 7 ||
+            candidate[0] != 'C' ||
+            candidate[6] != 'E' ||
+            !int.TryParse(
+                candidate.AsSpan(1, 2),
+                NumberStyles.None,
+                CultureInfo.InvariantCulture,
+                out int twoDigitYear) ||
+            !int.TryParse(
+                candidate.AsSpan(3, 3),
+                NumberStyles.None,
+                CultureInfo.InvariantCulture,
+                out int dayOfYear))
+        {
+            return false;
+        }
+
+        int year = 2000 + twoDigitYear;
+        int daysInYear = DateTime.IsLeapYear(year) ? 366 : 365;
+
+        if (dayOfYear < 1 || dayOfYear > daysInYear)
+            return false;
+
+        string date = new DateOnly(year, 1, 1)
+            .AddDays(dayOfYear - 1)
+            .ToString("yyyyMMdd", CultureInfo.InvariantCulture);
+
+        string reconstructed =
+            prefix
+            + candidate
+            + marker
+            + date
+            + candidate[6..]
+            + "0"
+            + suffix;
+
+        if (!string.Equals(
+                reconstructed,
+                information,
+                StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        payload = candidate;
+        return true;
     }
 
     private static long GetOrCreateTextLookupId(
