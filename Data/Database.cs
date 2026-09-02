@@ -202,27 +202,27 @@ internal static class Database
             (Id, Name, Prefix, Suffix, ReconstructionKind)
         VALUES
             (1,  'TRN_1411289245_0000877_26',
-                 'TRN*1*', '*1411289245*0000877 26\', 0),
+                 'TRN*1*', '*1411289245*0000877 26' || char(92), 0),
             (2,  'TRN_1411289245_000087726_ALT',
-                 'TRN*1*', '*1411289245*000087726 \', 0),
+                 'TRN*1*', '*1411289245*000087726 ' || char(92), 0),
             (3,  'TRN_1411648670',
-                 'TRN*1*', '*1411648670\', 0),
+                 'TRN*1*', '*1411648670' || char(92), 0),
             (4,  'TRN_1066033492',
-                 'TRN*1*', '*1066033492\', 0),
+                 'TRN*1*', '*1066033492' || char(92), 0),
             (5,  'TRN_1361236610_CP_DERIVED',
                  'TRN*1*', '', 1),
             (6,  'TRN_1341858379',
-                 'TRN*1*', '*1341858379\', 0),
+                 'TRN*1*', '*1341858379' || char(92), 0),
             (7,  'TRN_1364004756_4004756',
                  'TRN*1*', '*1364004756*36 4004756~                                      0', 0),
             (8,  'TRN_1391995276_UMR01',
-                 'TRN*1*', '*139 1995276*0000UMR01\', 0),
+                 'TRN*1*', '*139 1995276*0000UMR01' || char(92), 0),
             (9,  'TRN_1860507074_UHCEX',
-                 'TRN*1*', '*1860507074*0 000UHCEX\', 0),
+                 'TRN*1*', '*1860507074*0 000UHCEX' || char(92), 0),
             (10, 'TRN_1591031071_HCCLAIMPMT',
                  'TRN*1*', '*1591031071~                                                    HCCLAIMPMT', 0),
             (11, 'TXP_337743360SOLE_012_20261231_T',
-                 'TXP*337743360SOLE*012*20261231*T*', '\', 0),
+                 'TXP*337743360SOLE*012*20261231*T*', char(92), 0),
             (12, 'RAW',
                  '', '', 0)
         ON CONFLICT (Id) DO UPDATE
@@ -265,7 +265,7 @@ internal static class Database
                         )
                     )
                     || substr(p.Payload, 7)
-                    || '0-1376879510\'
+                    || '0-1376879510' || char(92)
                 ELSE
                     f.Prefix || p.Payload || f.Suffix
             END AS Information
@@ -936,27 +936,27 @@ internal static class Database
             (Id, Name, Prefix, Suffix, ReconstructionKind)
         VALUES
             (1,  'TRN_1411289245_0000877_26',
-                 'TRN*1*', '*1411289245*0000877 26\', 0),
+                 'TRN*1*', '*1411289245*0000877 26' || char(92), 0),
             (2,  'TRN_1411289245_000087726_ALT',
-                 'TRN*1*', '*1411289245*000087726 \', 0),
+                 'TRN*1*', '*1411289245*000087726 ' || char(92), 0),
             (3,  'TRN_1411648670',
-                 'TRN*1*', '*1411648670\', 0),
+                 'TRN*1*', '*1411648670' || char(92), 0),
             (4,  'TRN_1066033492',
-                 'TRN*1*', '*1066033492\', 0),
+                 'TRN*1*', '*1066033492' || char(92), 0),
             (5,  'TRN_1361236610_CP_DERIVED',
                  'TRN*1*', '', 1),
             (6,  'TRN_1341858379',
-                 'TRN*1*', '*1341858379\', 0),
+                 'TRN*1*', '*1341858379' || char(92), 0),
             (7,  'TRN_1364004756_4004756',
                  'TRN*1*', '*1364004756*36 4004756~                                      0', 0),
             (8,  'TRN_1391995276_UMR01',
-                 'TRN*1*', '*139 1995276*0000UMR01\', 0),
+                 'TRN*1*', '*139 1995276*0000UMR01' || char(92), 0),
             (9,  'TRN_1860507074_UHCEX',
-                 'TRN*1*', '*1860507074*0 000UHCEX\', 0),
+                 'TRN*1*', '*1860507074*0 000UHCEX' || char(92), 0),
             (10, 'TRN_1591031071_HCCLAIMPMT',
                  'TRN*1*', '*1591031071~                                                    HCCLAIMPMT', 0),
             (11, 'TXP_337743360SOLE_012_20261231_T',
-                 'TXP*337743360SOLE*012*20261231*T*', '\', 0),
+                 'TXP*337743360SOLE*012*20261231*T*', char(92), 0),
             (12, 'RAW',
                  '', '', 0)
         ON CONFLICT (Id) DO UPDATE
@@ -985,7 +985,7 @@ internal static class Database
                 CASE
                     WHEN substr(Information, 1, 6) = 'TRN*1*'
                      AND instr(Information, '*1361236610*CP ') > 6
-                     AND substr(Information, -12) = '-1376879510\'
+                     AND substr(Information, -12) = '-1376879510' || char(92)
                     THEN substr(
                         Information,
                         7,
@@ -1020,43 +1020,43 @@ internal static class Database
                                 )
                             )
                             || substr(CpPayload, 7)
-                            || '0-1376879510\'
+                            || '0-1376879510' || char(92)
                         ) = Information
                     THEN 5
 
                     WHEN substr(Information, 1, 6) = 'TRN*1*'
                      AND substr(
                             Information,
-                            -length('*1411289245*0000877 26\')
-                         ) = '*1411289245*0000877 26\'
+                            -length('*1411289245*0000877 26' || char(92))
+                         ) = '*1411289245*0000877 26' || char(92)
                     THEN 1
 
                     WHEN substr(Information, 1, 6) = 'TRN*1*'
                      AND substr(
                             Information,
-                            -length('*1411289245*000087726 \')
-                         ) = '*1411289245*000087726 \'
+                            -length('*1411289245*000087726 ' || char(92))
+                         ) = '*1411289245*000087726 ' || char(92)
                     THEN 2
 
                     WHEN substr(Information, 1, 6) = 'TRN*1*'
                      AND substr(
                             Information,
-                            -length('*1411648670\')
-                         ) = '*1411648670\'
+                            -length('*1411648670' || char(92))
+                         ) = '*1411648670' || char(92)
                     THEN 3
 
                     WHEN substr(Information, 1, 6) = 'TRN*1*'
                      AND substr(
                             Information,
-                            -length('*1066033492\')
-                         ) = '*1066033492\'
+                            -length('*1066033492' || char(92))
+                         ) = '*1066033492' || char(92)
                     THEN 4
 
                     WHEN substr(Information, 1, 6) = 'TRN*1*'
                      AND substr(
                             Information,
-                            -length('*1341858379\')
-                         ) = '*1341858379\'
+                            -length('*1341858379' || char(92))
+                         ) = '*1341858379' || char(92)
                     THEN 6
 
                     WHEN substr(Information, 1, 6) = 'TRN*1*'
@@ -1069,15 +1069,15 @@ internal static class Database
                     WHEN substr(Information, 1, 6) = 'TRN*1*'
                      AND substr(
                             Information,
-                            -length('*139 1995276*0000UMR01\')
-                         ) = '*139 1995276*0000UMR01\'
+                            -length('*139 1995276*0000UMR01' || char(92))
+                         ) = '*139 1995276*0000UMR01' || char(92)
                     THEN 8
 
                     WHEN substr(Information, 1, 6) = 'TRN*1*'
                      AND substr(
                             Information,
-                            -length('*1860507074*0 000UHCEX\')
-                         ) = '*1860507074*0 000UHCEX\'
+                            -length('*1860507074*0 000UHCEX' || char(92))
+                         ) = '*1860507074*0 000UHCEX' || char(92)
                     THEN 9
 
                     WHEN substr(Information, 1, 6) = 'TRN*1*'
@@ -1092,7 +1092,7 @@ internal static class Database
                             1,
                             length('TXP*337743360SOLE*012*20261231*T*')
                          ) = 'TXP*337743360SOLE*012*20261231*T*'
-                     AND substr(Information, -1) = '\'
+                     AND substr(Information, -1) = char(92)
                     THEN 11
 
                     ELSE 12
@@ -1110,28 +1110,28 @@ internal static class Database
                     7,
                     length(Information)
                     - 6
-                    - length('*1411289245*0000877 26\')
+                    - length('*1411289245*0000877 26' || char(92))
                 )
                 WHEN 2 THEN substr(
                     Information,
                     7,
                     length(Information)
                     - 6
-                    - length('*1411289245*000087726 \')
+                    - length('*1411289245*000087726 ' || char(92))
                 )
                 WHEN 3 THEN substr(
                     Information,
                     7,
                     length(Information)
                     - 6
-                    - length('*1411648670\')
+                    - length('*1411648670' || char(92))
                 )
                 WHEN 4 THEN substr(
                     Information,
                     7,
                     length(Information)
                     - 6
-                    - length('*1066033492\')
+                    - length('*1066033492' || char(92))
                 )
                 WHEN 5 THEN CpPayload
                 WHEN 6 THEN substr(
@@ -1139,7 +1139,7 @@ internal static class Database
                     7,
                     length(Information)
                     - 6
-                    - length('*1341858379\')
+                    - length('*1341858379' || char(92))
                 )
                 WHEN 7 THEN substr(
                     Information,
@@ -1153,14 +1153,14 @@ internal static class Database
                     7,
                     length(Information)
                     - 6
-                    - length('*139 1995276*0000UMR01\')
+                    - length('*139 1995276*0000UMR01' || char(92))
                 )
                 WHEN 9 THEN substr(
                     Information,
                     7,
                     length(Information)
                     - 6
-                    - length('*1860507074*0 000UHCEX\')
+                    - length('*1860507074*0 000UHCEX' || char(92))
                 )
                 WHEN 10 THEN substr(
                     Information,
