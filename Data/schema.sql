@@ -1,5 +1,4 @@
 PRAGMA foreign_keys = ON;
-PRAGMA page_size = 512;
 
 -- Lookup/entity tables use surrogate INTEGER primary keys. Human-readable
 -- values remain UNIQUE so the importer can safely resolve them to IDs.
