@@ -5,9 +5,11 @@ namespace SoloPractice.Data;
 
 internal static class Database
 {
-    private const int CurrentSchemaVersion = 5;
+    private const int CurrentSchemaVersion = 6;
 
-    private const string CurrentSchemaSql = """
+    // Historical v5 schema text retained beside the v3-v5 migration scripts;
+    // the authoritative current schema is the embedded Data/schema.sql resource.
+    private const string LegacyVersion5SchemaSql = """
         PRAGMA foreign_keys = ON;
 
         -- Lookup/entity tables use surrogate INTEGER primary keys. Human-readable
@@ -1328,7 +1330,22 @@ internal static class Database
             MigrateVersion4PaymentInformationToVersion5(connection);
         }
 
-        ExecuteNonQuery(connection, CurrentSchemaSql);
+        if (!hasTransactions)
+        {
+            ExecuteNonQuery(connection, LoadCurrentSchemaSql());
+        }
+        else
+        {
+            if (!TableExists(connection, "AccountingEntries") ||
+                GetUserVersion(connection) < CurrentSchemaVersion)
+            {
+                MigrateVersion5ToVersion6(connection);
+            }
+
+            // Reapply only accounting-owned DDL and seeds.  Initialization of
+            // an imported database must not update any Chase/source table.
+            ExecuteNonQuery(connection, LoadAccountingSchemaSql());
+        }
         ValidateSchemaShape(connection);
         ValidateForeignKeys(connection);
 
@@ -1545,7 +1562,7 @@ internal static class Database
             SetUserVersion(
                 connection,
                 transaction,
-                CurrentSchemaVersion);
+                5);
 
             ValidateForeignKeys(connection, transaction);
             transaction.Commit();
@@ -1554,6 +1571,45 @@ internal static class Database
         {
             ExecuteNonQuery(connection, "PRAGMA foreign_keys = ON;");
         }
+    }
+
+    private static void MigrateVersion5ToVersion6(
+        SqliteConnection connection)
+    {
+        using SqliteTransaction transaction = connection.BeginTransaction();
+
+        ExecuteNonQuery(
+            connection,
+            LoadAccountingSchemaSql(),
+            transaction);
+
+        SetUserVersion(connection, transaction, CurrentSchemaVersion);
+        ValidateForeignKeys(connection, transaction);
+        transaction.Commit();
+    }
+
+    private static string LoadCurrentSchemaSql()
+    {
+        const string suffix = ".Data.schema.sql";
+        System.Reflection.Assembly assembly = typeof(Database).Assembly;
+        string resourceName = assembly.GetManifestResourceNames()
+            .Single(name => name.EndsWith(suffix, StringComparison.Ordinal));
+
+        using Stream stream = assembly.GetManifestResourceStream(resourceName)
+            ?? throw new InvalidOperationException(
+                $"Embedded schema resource {resourceName} was not found.");
+        using var reader = new StreamReader(stream);
+        return reader.ReadToEnd();
+    }
+
+    private static string LoadAccountingSchemaSql()
+    {
+        const string marker = "-- The accounting layer is deliberately separate";
+        string schema = LoadCurrentSchemaSql();
+        int start = schema.IndexOf(marker, StringComparison.Ordinal);
+        if (start < 0)
+            throw new InvalidOperationException("The embedded schema has no accounting-layer section.");
+        return schema[start..];
     }
 
     private static void ValidateSchemaShape(SqliteConnection connection)
@@ -1592,7 +1648,13 @@ internal static class Database
             "FeeTransactions",
             "RealTimePayments",
             "UnparsedDepositDescriptions",
-            "ImportRows"
+            "ImportRows",
+            "AccountingCategories",
+            "AccountingTextValues",
+            "AccountingDateValues",
+            "AccountingMoneyValues",
+            "AccountingCheckNumbers",
+            "AccountingEntries"
         ];
 
         foreach (string table in requiredIntegerPrimaryKeyTables)
@@ -1681,7 +1743,8 @@ internal static class Database
 
         foreach (string table in requiredIntegerPrimaryKeyTables)
         {
-            if (string.Equals(table, "DateValues", StringComparison.Ordinal))
+            if (string.Equals(table, "DateValues", StringComparison.Ordinal) ||
+                string.Equals(table, "AccountingDateValues", StringComparison.Ordinal))
                 continue;
 
             foreach (var column in ReadTableColumns(connection, table))
@@ -1724,6 +1787,24 @@ internal static class Database
                 throw new InvalidDataException(
                     $"Legacy natural-key column {forbidden} still exists after migration.");
             }
+        }
+
+        List<(string Name, string Type, int PrimaryKeyOrder)> junctionColumns =
+            ReadTableColumns(connection, "AccountingEntryTransactions");
+
+        if (junctionColumns.Count != 2 ||
+            junctionColumns.Any(column =>
+                !string.Equals(column.Type, "INTEGER", StringComparison.OrdinalIgnoreCase) ||
+                column.PrimaryKeyOrder == 0))
+        {
+            throw new InvalidDataException(
+                "AccountingEntryTransactions must have the expected two-column INTEGER primary key.");
+        }
+
+        if (!ColumnExists(connection, null, "AccountingEntries", "IsOpeningBalance"))
+        {
+            throw new InvalidDataException(
+                "AccountingEntries.IsOpeningBalance is missing from the v6 schema.");
         }
     }
 

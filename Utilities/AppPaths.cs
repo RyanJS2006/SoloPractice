@@ -23,10 +23,18 @@ internal static class AppPaths
         }
     }
 
-    public static string ApplicationDirectory =>
-        Path.Combine(
-            DocumentsDirectory,
-            ApplicationFolderName);
+    public static string ApplicationDirectory
+    {
+        get
+        {
+            string? overrideDirectory =
+                Environment.GetEnvironmentVariable("SOLOPRACTICE_DATA_DIRECTORY");
+
+            return string.IsNullOrWhiteSpace(overrideDirectory)
+                ? Path.Combine(DocumentsDirectory, ApplicationFolderName)
+                : Path.GetFullPath(overrideDirectory);
+        }
+    }
 
     public static string DatabasePath =>
         Path.Combine(

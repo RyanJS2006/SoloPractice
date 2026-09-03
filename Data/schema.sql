@@ -511,5 +511,132 @@ CREATE INDEX IF NOT EXISTS IX_AccountTransfers_Direction
 CREATE INDEX IF NOT EXISTS IX_AccountTransfers_Counterparty
     ON AccountTransfers(CounterpartyId);
 
-PRAGMA user_version = 5;
+-- The accounting layer is deliberately separate from the immutable Chase
+-- import layer above.  It is the canonical, editable representation of the
+-- rows shown in generated accounting workbooks.
+CREATE TABLE IF NOT EXISTS AccountingCategories
+(
+    Id             INTEGER PRIMARY KEY,
+    Name           TEXT NOT NULL COLLATE NOCASE UNIQUE,
+    DisplayOrder   INTEGER NOT NULL DEFAULT 0,
+    IsActive       INTEGER NOT NULL DEFAULT 1 CHECK (IsActive IN (0, 1)),
+    NormalSide     TEXT CHECK (NormalSide IN ('DEBIT', 'CREDIT', 'NEUTRAL')),
+    StatementGroup TEXT
+) STRICT;
+
+INSERT INTO AccountingCategories
+    (Name, DisplayOrder, IsActive, NormalSide, StatementGroup)
+VALUES
+    ('Counselling Fee', 10, 1, 'CREDIT', 'Revenue'),
+    ('Other Revenue', 20, 1, 'CREDIT', 'Revenue'),
+    ('Transfers In', 30, 1, 'CREDIT', 'Transfer'),
+    ('Transfers Out', 40, 1, 'DEBIT', 'Transfer'),
+    ('Transfers in', 41, 0, 'CREDIT', 'Transfer'),
+    ('Owners Draw', 50, 1, 'DEBIT', 'Equity'),
+    ('Owner Draw', 51, 0, 'DEBIT', 'Equity'),
+    ('Payroll Taxes', 60, 1, 'DEBIT', 'Expense'),
+    ('Rebates', 70, 1, 'DEBIT', 'Expense'),
+    ('Rent', 80, 1, 'DEBIT', 'Expense'),
+    ('Auto Expense', 90, 1, 'DEBIT', 'Expense'),
+    ('Meals & Entertainment', 100, 1, 'DEBIT', 'Expense'),
+    ('Insurance - Liability', 110, 1, 'DEBIT', 'Expense'),
+    ('Insurance - Work Comp', 120, 1, 'DEBIT', 'Expense'),
+    ('Interest Expense', 130, 1, 'DEBIT', 'Expense'),
+    ('Legal Expense', 140, 1, 'DEBIT', 'Expense'),
+    ('Licenses & Dues', 150, 1, 'DEBIT', 'Expense'),
+    ('License Fees', 151, 1, 'DEBIT', 'Expense'),
+    ('Office Expense', 160, 1, 'DEBIT', 'Expense'),
+    ('Telephone', 170, 1, 'DEBIT', 'Expense'),
+    ('Misc. Expense', 180, 1, 'DEBIT', 'Expense'),
+    ('Credit Card Payment, Transfers out and non-deductible exp', 190, 1, 'DEBIT', 'Transfer'),
+    ('Accounting Fee', 200, 1, 'DEBIT', 'Expense'),
+    ('Advertising Expense', 210, 1, 'DEBIT', 'Expense'),
+    ('Credit Card Pmt', 220, 1, 'CREDIT', 'Transfer'),
+    ('Refunds / Reimbursements', 230, 1, 'CREDIT', 'Revenue'),
+    ('Refunds / Reimburse-ments', 231, 1, 'CREDIT', 'Revenue'),
+    ('Software Expense', 240, 1, 'DEBIT', 'Expense'),
+    ('Advertising', 250, 1, 'DEBIT', 'Expense'),
+    ('Continuing Ed', 260, 1, 'DEBIT', 'Expense'),
+    ('LLC Fee', 270, 1, 'DEBIT', 'Expense'),
+    ('Professional Association Fee', 280, 1, 'DEBIT', 'Expense'),
+    ('Professional Licenses Fee', 290, 1, 'DEBIT', 'Expense'),
+    ('WiFi Fee', 300, 1, 'DEBIT', 'Expense')
+ON CONFLICT (Name) DO NOTHING;
+
+CREATE TABLE IF NOT EXISTS AccountingTextValues
+(
+    Id    INTEGER PRIMARY KEY,
+    Kind  TEXT NOT NULL CHECK (Kind IN ('DESCRIPTION', 'EXPLANATION')),
+    Value TEXT NOT NULL,
+    UNIQUE (Kind, Value)
+) STRICT;
+
+CREATE TABLE IF NOT EXISTS AccountingDateValues
+(
+    Id          INTEGER PRIMARY KEY,
+    UnixSeconds INTEGER NOT NULL UNIQUE CHECK (UnixSeconds % 86400 = 0)
+) STRICT;
+
+CREATE TABLE IF NOT EXISTS AccountingMoneyValues
+(
+    Id    INTEGER PRIMARY KEY,
+    Cents INTEGER NOT NULL UNIQUE
+) STRICT;
+
+CREATE TABLE IF NOT EXISTS AccountingCheckNumbers
+(
+    Id     INTEGER PRIMARY KEY,
+    Number TEXT NOT NULL UNIQUE
+) STRICT;
+
+CREATE TABLE IF NOT EXISTS AccountingEntries
+(
+    Id                INTEGER PRIMARY KEY,
+    AccountId         INTEGER NOT NULL,
+    EntryDateId       INTEGER NOT NULL,
+    AmountId          INTEGER NOT NULL,
+    DescriptionTextId INTEGER NOT NULL,
+    ExplanationTextId INTEGER,
+    CategoryId        INTEGER,
+    CheckNumberId     INTEGER,
+    DisplayOrder      INTEGER NOT NULL,
+    IsOpeningBalance  INTEGER NOT NULL DEFAULT 0 CHECK (IsOpeningBalance IN (0, 1)),
+    IsManual          INTEGER NOT NULL DEFAULT 0 CHECK (IsManual IN (0, 1)),
+    NeedsReview       INTEGER NOT NULL DEFAULT 0 CHECK (NeedsReview IN (0, 1)),
+    IsSuppressed      INTEGER NOT NULL DEFAULT 0 CHECK (IsSuppressed IN (0, 1)),
+    CreatedAtUtc      TEXT NOT NULL,
+    ModifiedAtUtc     TEXT NOT NULL,
+
+    FOREIGN KEY (AccountId) REFERENCES Accounts(Id),
+    FOREIGN KEY (EntryDateId) REFERENCES AccountingDateValues(Id),
+    FOREIGN KEY (AmountId) REFERENCES AccountingMoneyValues(Id),
+    FOREIGN KEY (DescriptionTextId) REFERENCES AccountingTextValues(Id),
+    FOREIGN KEY (ExplanationTextId) REFERENCES AccountingTextValues(Id),
+    FOREIGN KEY (CategoryId) REFERENCES AccountingCategories(Id),
+    FOREIGN KEY (CheckNumberId) REFERENCES AccountingCheckNumbers(Id)
+) STRICT;
+
+CREATE TABLE IF NOT EXISTS AccountingEntryTransactions
+(
+    AccountingEntryId INTEGER NOT NULL,
+    TransactionId     INTEGER NOT NULL,
+    PRIMARY KEY (AccountingEntryId, TransactionId),
+    FOREIGN KEY (AccountingEntryId)
+        REFERENCES AccountingEntries(Id)
+        ON DELETE CASCADE,
+    FOREIGN KEY (TransactionId)
+        REFERENCES Transactions(Id)
+) STRICT;
+
+CREATE INDEX IF NOT EXISTS IX_AccountingEntries_AccountDateOrder
+    ON AccountingEntries(AccountId, EntryDateId, DisplayOrder);
+CREATE INDEX IF NOT EXISTS IX_AccountingEntries_Category
+    ON AccountingEntries(CategoryId);
+CREATE UNIQUE INDEX IF NOT EXISTS UX_AccountingEntries_OpeningBalance
+    ON AccountingEntries(AccountId, EntryDateId)
+    WHERE IsOpeningBalance = 1;
+CREATE INDEX IF NOT EXISTS IX_AccountingEntryTransactions_Transaction
+    ON AccountingEntryTransactions(TransactionId);
+
+PRAGMA user_version = 6;
 PRAGMA optimize;

@@ -10,7 +10,7 @@ internal static class Program
     private const int ResizeDebounceMilliseconds = 100;
     private const int CsvPasteIdleMilliseconds = 100;
 
-    private static void Main()
+    private static void Main(string[] args)
     {
         try
         {
@@ -26,7 +26,74 @@ internal static class Program
             return;
         }
 
+        if (args.Length > 0)
+        {
+            RunCommand(args);
+            return;
+        }
+
         RunMainMenu();
+    }
+
+    private static void RunCommand(string[] args)
+    {
+        try
+        {
+            if (args[0].Equals("--accounting-update", StringComparison.OrdinalIgnoreCase))
+            {
+                int year = args.Length >= 2
+                    ? int.Parse(args[1], System.Globalization.CultureInfo.InvariantCulture)
+                    : DateTime.Today.Year;
+                string path = args.Length >= 3
+                    ? Path.GetFullPath(args[2])
+                    : AccountingWorkbookService.GetWorkbookPath(year);
+
+                AccountingWorkbookSyncResult? imported = null;
+                bool legacy = File.Exists(path) &&
+                    !AccountingWorkbookService.IsDatabaseBackedWorkbook(year, path);
+                if (File.Exists(path) && !legacy)
+                    imported = AccountingWorkbookService.ImportWorkbookEdits(year, path);
+                AccountingGenerationResult generated = AccountingLedgerService.GenerateMissingEntries(year);
+                if (legacy)
+                    imported = AccountingWorkbookService.ImportLegacyWorkbookEdits(year, path);
+                AccountingWorkbookResult workbook = AccountingWorkbookService.Generate(year, path);
+
+                Console.WriteLine(
+                    $"Workbook: {workbook.WorkbookPath}\n" +
+                    $"Entries created: {generated.EntriesCreated}\n" +
+                    $"Source transactions linked: {generated.SourceTransactionsLinked}\n" +
+                    $"Rows imported: {(imported?.RowsInserted ?? 0)}\n" +
+                    $"Rows updated: {(imported?.RowsUpdated ?? 0)}\n" +
+                    $"Categories added: {(imported?.CategoriesAdded ?? 0)}\n" +
+                    $"Rows to review: {workbook.ReviewRows}");
+                return;
+            }
+
+            if (args[0].Equals("--accounting-sync", StringComparison.OrdinalIgnoreCase) && args.Length == 3)
+            {
+                int year = int.Parse(args[1], System.Globalization.CultureInfo.InvariantCulture);
+                string path = Path.GetFullPath(args[2]);
+                AccountingWorkbookSyncResult sync = AccountingWorkbookService.ImportWorkbookEdits(year, path);
+                AccountingWorkbookService.Generate(year, path);
+                Console.WriteLine(
+                    $"Rows inserted: {sync.RowsInserted}\n" +
+                    $"Rows updated: {sync.RowsUpdated}\n" +
+                    $"Categories added: {sync.CategoriesAdded}\n" +
+                    $"Unresolved rows: {sync.UnresolvedRows}");
+                return;
+            }
+
+            Console.Error.WriteLine(
+                "Usage:\n" +
+                "  SoloPractice --accounting-update [year] [workbook-path]\n" +
+                "  SoloPractice --accounting-sync <year> <workbook-path>");
+            Environment.ExitCode = 2;
+        }
+        catch (Exception exception)
+        {
+            Console.Error.WriteLine(exception.Message);
+            Environment.ExitCode = 1;
+        }
     }
 
     private static void RunMainMenu()
@@ -559,14 +626,42 @@ internal static class Program
         try
         {
             int year = DateTime.Today.Year;
+            string workbookPath = AccountingWorkbookService.GetWorkbookPath(year);
 
             Console.ForegroundColor = ConsoleColor.Gray;
             Console.WriteLine(
-                $"Building the {year} workbook from SoloPractice.db...");
+                $"Updating the {year} accounting ledger from SoloPractice.db...");
             Console.WriteLine();
 
-            AccountingWorksheetResult result =
-                AccountingWorksheetGenerator.GenerateOrUpdate(year);
+            AccountingWorkbookSyncResult? preSync = null;
+            bool legacyWorkbook = false;
+
+            if (File.Exists(workbookPath))
+            {
+                legacyWorkbook = !AccountingWorkbookService.IsDatabaseBackedWorkbook(
+                    year,
+                    workbookPath);
+
+                if (!legacyWorkbook)
+                {
+                    preSync = AccountingWorkbookService.ImportWorkbookEdits(
+                        year,
+                        workbookPath);
+                }
+            }
+
+            AccountingGenerationResult generated =
+                AccountingLedgerService.GenerateMissingEntries(year);
+
+            if (legacyWorkbook)
+            {
+                preSync = AccountingWorkbookService.ImportLegacyWorkbookEdits(
+                    year,
+                    workbookPath);
+            }
+
+            AccountingWorkbookResult result =
+                AccountingWorkbookService.Generate(year);
 
             Console.ForegroundColor = ConsoleColor.Green;
             Console.WriteLine(
@@ -584,6 +679,14 @@ internal static class Program
                 $"Credit-card rows: {result.CreditCardRows:N0}");
             Console.WriteLine(
                 $"Rows to review:   {result.ReviewRows:N0}");
+            Console.WriteLine(
+                $"New ledger rows:  {generated.EntriesCreated:N0}");
+            if (preSync is not null)
+            {
+                Console.WriteLine(
+                    $"Saved edits imported: {preSync.RowsUpdated:N0} updated, " +
+                    $"{preSync.RowsInserted:N0} inserted");
+            }
             Console.WriteLine();
             Console.WriteLine(result.WorkbookPath);
 
@@ -594,12 +697,54 @@ internal static class Program
                 Console.WriteLine(
                     "Rows highlighted in yellow still need an accounting decision.");
             }
+
+            AccountingWorkbookService.OpenWorkbook(result.WorkbookPath);
+
+            Console.ForegroundColor = ConsoleColor.Gray;
+            Console.WriteLine();
+            Console.WriteLine("Edit the workbook in Excel and save it.");
+            Console.WriteLine();
+            Console.Write("Press ");
+            WriteKeyBadge("[Enter]");
+            Console.ForegroundColor = ConsoleColor.Gray;
+            Console.WriteLine(" to sync saved spreadsheet changes back into SoloPractice.");
+            Console.Write("Press ");
+            WriteKeyBadge("[Esc]");
+            Console.ForegroundColor = ConsoleColor.Gray;
+            Console.WriteLine(" to return without syncing now.");
+
+            while (true)
+            {
+                ConsoleKey key = Console.ReadKey(intercept: true).Key;
+                if (key == ConsoleKey.Escape)
+                {
+                    Console.ResetColor();
+                    return;
+                }
+                if (key != ConsoleKey.Enter)
+                    continue;
+
+                Console.WriteLine();
+                Console.WriteLine("Reading the saved workbook...");
+                AccountingWorkbookSyncResult sync =
+                    AccountingWorkbookService.ImportWorkbookEdits(year, result.WorkbookPath);
+                AccountingWorkbookService.Generate(year, result.WorkbookPath);
+
+                Console.ForegroundColor = ConsoleColor.Green;
+                Console.WriteLine("Spreadsheet changes synced successfully.");
+                Console.ForegroundColor = ConsoleColor.Gray;
+                Console.WriteLine($"Rows inserted:    {sync.RowsInserted:N0}");
+                Console.WriteLine($"Rows updated:     {sync.RowsUpdated:N0}");
+                Console.WriteLine($"Categories added: {sync.CategoriesAdded:N0}");
+                Console.WriteLine($"Unresolved rows:  {sync.UnresolvedRows:N0}");
+                break;
+            }
         }
         catch (Exception exception)
         {
             Console.ForegroundColor = ConsoleColor.Red;
             Console.WriteLine(
-                "Could not generate the accounting workbook.");
+                "Could not generate or sync the accounting workbook.");
             Console.WriteLine();
 
             Console.ForegroundColor = ConsoleColor.White;
@@ -630,6 +775,14 @@ internal static class Program
         }
 
         Console.ResetColor();
+    }
+
+    private static void WriteKeyBadge(string text)
+    {
+        Console.ForegroundColor = ConsoleColor.Black;
+        Console.BackgroundColor = ConsoleColor.Cyan;
+        Console.Write(text);
+        Console.BackgroundColor = ConsoleColor.Black;
     }
 
     private static void NotImplemented(
