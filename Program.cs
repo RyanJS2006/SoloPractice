@@ -10,6 +10,15 @@ internal static class Program
     private const int ResizeDebounceMilliseconds = 100;
     private const int CsvPasteIdleMilliseconds = 100;
 
+    private static readonly (MainMenuAction Action, string Label)[] MainMenuOptions =
+    [
+        (MainMenuAction.ImportChase, "Import Chase Bank Statement CSV"),
+        (MainMenuAction.AccountingWorksheet, "Generate/Update/Open Accounting Spreadsheet"),
+        (MainMenuAction.ReceiptScans, "Upload Receipt Scans"),
+        (MainMenuAction.InsuranceAndTaxForms, "Upload Insurance Company Statements and Tax Forms"),
+        (MainMenuAction.About, "About")
+    ];
+
     private static void Main(string[] args)
     {
         try
@@ -105,8 +114,6 @@ internal static class Program
     {
         while (true)
         {
-            DrawMainMenu();
-
             MainMenuSelection selection =
                 WaitForMainMenuSelection();
 
@@ -138,7 +145,7 @@ internal static class Program
         }
     }
 
-    private static void DrawMainMenu()
+    private static void DrawMainMenu(int selectedIndex)
     {
         ClearForRedraw();
         Console.CursorVisible = false;
@@ -153,31 +160,68 @@ internal static class Program
             
             """);
 
-        Console.ForegroundColor = ConsoleColor.Cyan; Console.Write("  1. "); Console.ForegroundColor = ConsoleColor.Gray; Console.WriteLine("Import Chase Bank Statement CSV");
-        Console.ForegroundColor = ConsoleColor.Cyan; Console.Write("  2. "); Console.ForegroundColor = ConsoleColor.Gray; Console.WriteLine("Generate/Update/Open Accounting Spreadsheet");
-        Console.ForegroundColor = ConsoleColor.Cyan; Console.Write("  3. "); Console.ForegroundColor = ConsoleColor.Gray; Console.WriteLine("Upload Receipt Scans");
-        Console.ForegroundColor = ConsoleColor.Cyan; Console.Write("  4. "); Console.ForegroundColor = ConsoleColor.Gray; Console.WriteLine("Upload Insurance Company Statements and Tax Forms");
-        Console.ForegroundColor = ConsoleColor.Cyan; Console.Write("  5. "); Console.ForegroundColor = ConsoleColor.Gray; Console.WriteLine("About"); Console.WriteLine("");
+        for (int i = 0; i < MainMenuOptions.Length; i++)
+            DrawMainMenuOption(i, selectedIndex, MainMenuOptions[i].Label);
 
+        Console.WriteLine();
         Console.ForegroundColor = ConsoleColor.DarkGray;
-        Console.Write("Press ");
-
-        Console.ForegroundColor = ConsoleColor.Black; Console.BackgroundColor = ConsoleColor.Cyan;
-        Console.Write("[Esc]"); Console.BackgroundColor = ConsoleColor.Black;
-
+        Console.Write("Use ");
+        DrawKeyHint("↑/↓");
+        Console.ForegroundColor = ConsoleColor.DarkGray;
+        Console.Write(" to Navigate, ");
+        DrawKeyHint("Enter");
+        Console.ForegroundColor = ConsoleColor.DarkGray;
+        Console.Write(" to Select, or ");
+        DrawKeyHint("Esc");
         Console.ForegroundColor = ConsoleColor.DarkGray;
         Console.WriteLine(" to Exit.");
 
         Console.WriteLine();
+        Console.ForegroundColor = ConsoleColor.DarkGray;
+        Console.WriteLine("You can also paste or drag a Chase CSV file into this window to import it.");
+        Console.ResetColor();
+    }
 
-        Console.ForegroundColor = ConsoleColor.White;
-        Console.Write("> ");
+    private static void DrawMainMenuOption(
+        int index,
+        int selectedIndex,
+        string label)
+    {
+        bool selected = index == selectedIndex;
 
-        Console.CursorVisible = true;
+        Console.ForegroundColor = selected
+            ? ConsoleColor.Cyan
+            : ConsoleColor.DarkGray;
+        Console.Write(selected ? "  > " : "    ");
+
+        if (selected)
+        {
+            Console.ForegroundColor = ConsoleColor.Black;
+            Console.BackgroundColor = ConsoleColor.Cyan;
+            Console.Write($" {label} ");
+            Console.ResetColor();
+            Console.WriteLine();
+        }
+        else
+        {
+            Console.ForegroundColor = ConsoleColor.Gray;
+            Console.WriteLine(label);
+        }
+    }
+
+    private static void DrawKeyHint(string text)
+    {
+        Console.ForegroundColor = ConsoleColor.Black;
+        Console.BackgroundColor = ConsoleColor.Cyan;
+        Console.Write($"[{text}]");
+        Console.ResetColor();
     }
 
     private static MainMenuSelection WaitForMainMenuSelection()
     {
+        int selectedIndex = 0;
+        DrawMainMenu(selectedIndex);
+
         int drawnWidth = Console.WindowWidth;
         int drawnHeight = Console.WindowHeight;
 
@@ -202,64 +246,60 @@ internal static class Program
                         MainMenuAction.Exit);
                 }
 
-                if (buffer.Length == 0)
+                if (key.Key == ConsoleKey.UpArrow)
                 {
-                    switch (key.Key)
-                    {
-                        case ConsoleKey.D1:
-                        case ConsoleKey.NumPad1:
-                            return new MainMenuSelection(
-                                MainMenuAction.ImportChase);
+                    selectedIndex =
+                        (selectedIndex - 1 + MainMenuOptions.Length) %
+                        MainMenuOptions.Length;
 
-                        case ConsoleKey.D2:
-                        case ConsoleKey.NumPad2:
-                            return new MainMenuSelection(
-                                MainMenuAction.AccountingWorksheet);
-
-                        case ConsoleKey.D3:
-                        case ConsoleKey.NumPad3:
-                            return new MainMenuSelection(
-                                MainMenuAction.ReceiptScans);
-
-                        case ConsoleKey.D4:
-                        case ConsoleKey.NumPad4:
-                            return new MainMenuSelection(
-                                MainMenuAction.InsuranceAndTaxForms);
-
-                        case ConsoleKey.D5:
-                        case ConsoleKey.NumPad5:
-                            return new MainMenuSelection(
-                                MainMenuAction.About);
-                    }
-                }
-
-                if (key.Key == ConsoleKey.Enter)
-                {
-                    if (TryGetExistingCsvPath(
-                            buffer.ToString(),
-                            out string? csvPath))
-                    {
-                        Console.WriteLine();
-
-                        return new MainMenuSelection(
-                            MainMenuAction.ImportChase,
-                            csvPath);
-                    }
-
-                    buffer.Clear();
-                    DrawMainMenu();
-
+                    DrawMainMenu(selectedIndex);
                     drawnWidth = Console.WindowWidth;
                     drawnHeight = Console.WindowHeight;
                     latestWidth = drawnWidth;
                     latestHeight = drawnHeight;
-
                     continue;
+                }
+
+                if (key.Key == ConsoleKey.DownArrow)
+                {
+                    selectedIndex =
+                        (selectedIndex + 1) % MainMenuOptions.Length;
+
+                    DrawMainMenu(selectedIndex);
+                    drawnWidth = Console.WindowWidth;
+                    drawnHeight = Console.WindowHeight;
+                    latestWidth = drawnWidth;
+                    latestHeight = drawnHeight;
+                    continue;
+                }
+
+                if (key.Key == ConsoleKey.Enter)
+                {
+                    if (buffer.Length > 0)
+                    {
+                        if (TryGetExistingCsvPath(
+                                buffer.ToString(),
+                                out string? csvPath))
+                        {
+                            return new MainMenuSelection(
+                                MainMenuAction.ImportChase,
+                                csvPath);
+                        }
+
+                        buffer.Clear();
+                        DrawMainMenu(selectedIndex);
+                        continue;
+                    }
+
+                    return new MainMenuSelection(
+                        MainMenuOptions[selectedIndex].Action);
                 }
 
                 if (key.Key == ConsoleKey.Backspace)
                 {
-                    RemoveLastConsoleCharacter(buffer);
+                    if (buffer.Length > 0)
+                        buffer.Length--;
+
                     lastTextInputTime = DateTime.UtcNow;
                     continue;
                 }
@@ -267,7 +307,6 @@ internal static class Program
                 if (!char.IsControl(key.KeyChar))
                 {
                     buffer.Append(key.KeyChar);
-                    Console.Write(key.KeyChar);
                     lastTextInputTime = DateTime.UtcNow;
                 }
             }
@@ -279,8 +318,6 @@ internal static class Program
                     buffer.ToString(),
                     out string? droppedCsvPath))
             {
-                Console.WriteLine();
-
                 return new MainMenuSelection(
                     MainMenuAction.ImportChase,
                     droppedCsvPath);
@@ -307,11 +344,7 @@ internal static class Program
 
             if (sizeChanged && resizeSettled)
             {
-                DrawMainMenu();
-
-                if (buffer.Length > 0)
-                    Console.Write(buffer.ToString());
-
+                DrawMainMenu(selectedIndex);
                 drawnWidth = latestWidth;
                 drawnHeight = latestHeight;
             }
