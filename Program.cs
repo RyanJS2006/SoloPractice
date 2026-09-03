@@ -75,23 +75,23 @@ internal static class Program
 
         Console.ForegroundColor = ConsoleColor.Gray;
         Console.WriteLine("""
-
+            
 
             SoloPractice is a C# program meant to turn CSV files downloaded from Chase's website into a flexible database of transactions. This database can then be used to automate and streamline accounting by automatically filling in most of the cells in a spreadsheet. There are also tools for organizing scans of receipts, insurance company statements, and tax forms.
-
-              1. Import Chase Bank Statement CSV
-              2. Generate/Update/Open Accounting Spreadsheet
-              3. Upload Receipt Scans
-              4. Upload Insurance Company Statements and Tax Forms
-              5. About
-
+            
             """);
+
+        Console.ForegroundColor = ConsoleColor.Cyan; Console.Write("  1. "); Console.ForegroundColor = ConsoleColor.Gray; Console.WriteLine("Import Chase Bank Statement CSV");
+        Console.ForegroundColor = ConsoleColor.Cyan; Console.Write("  2. "); Console.ForegroundColor = ConsoleColor.Gray; Console.WriteLine("Generate/Update/Open Accounting Spreadsheet");
+        Console.ForegroundColor = ConsoleColor.Cyan; Console.Write("  3. "); Console.ForegroundColor = ConsoleColor.Gray; Console.WriteLine("Upload Receipt Scans");
+        Console.ForegroundColor = ConsoleColor.Cyan; Console.Write("  4. "); Console.ForegroundColor = ConsoleColor.Gray; Console.WriteLine("Upload Insurance Company Statements and Tax Forms");
+        Console.ForegroundColor = ConsoleColor.Cyan; Console.Write("  5. "); Console.ForegroundColor = ConsoleColor.Gray; Console.WriteLine("About"); Console.WriteLine("");
 
         Console.ForegroundColor = ConsoleColor.DarkGray;
         Console.Write("Press ");
 
-        Console.ForegroundColor = ConsoleColor.Cyan;
-        Console.Write("[Esc]");
+        Console.ForegroundColor = ConsoleColor.Black; Console.BackgroundColor = ConsoleColor.Cyan;
+        Console.Write("[Esc]"); Console.BackgroundColor = ConsoleColor.Black;
 
         Console.ForegroundColor = ConsoleColor.DarkGray;
         Console.WriteLine(" to Exit.");
@@ -309,8 +309,8 @@ internal static class Program
         Console.ForegroundColor = ConsoleColor.DarkGray;
         Console.Write("Press ");
 
-        Console.ForegroundColor = ConsoleColor.Cyan;
-        Console.Write("[Esc]");
+        Console.ForegroundColor = ConsoleColor.Black; Console.BackgroundColor = ConsoleColor.Cyan;
+        Console.Write("[Esc]"); Console.BackgroundColor = ConsoleColor.Black;
 
         Console.ForegroundColor = ConsoleColor.DarkGray;
         Console.WriteLine(" to go back.");
@@ -560,8 +560,8 @@ internal static class Program
         Console.ForegroundColor = ConsoleColor.DarkGray;
         Console.Write("Press ");
 
-        Console.ForegroundColor = ConsoleColor.Cyan;
-        Console.Write("[Esc]");
+        Console.ForegroundColor = ConsoleColor.Black; Console.BackgroundColor = ConsoleColor.Cyan;
+        Console.Write("[Esc]"); Console.BackgroundColor = ConsoleColor.Black;
 
         Console.ForegroundColor = ConsoleColor.DarkGray;
         Console.WriteLine(" to go back.");
