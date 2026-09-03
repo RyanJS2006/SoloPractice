@@ -119,6 +119,64 @@ internal static class AccountingLedgerService
         return new AccountingGenerationResult(created + openingsCreated, linked, openingsCreated);
     }
 
+    public static bool HasUnlinkedSourceTransactions(int year)
+    {
+        ValidateYear(year);
+
+        using SqliteConnection connection = Database.OpenConnection();
+        using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT EXISTS
+            (
+                SELECT 1
+                FROM Transactions t
+                JOIN Accounts account ON account.Id = t.AccountId
+                JOIN DateValues postingDate ON postingDate.Id = t.PostingDateId
+                LEFT JOIN CreditCardTransactions card ON card.TransactionId = t.Id
+                LEFT JOIN DateValues transactionDate ON transactionDate.Id = card.TransactionDateId
+                LEFT JOIN AccountingEntryTransactions linked ON linked.TransactionId = t.Id
+                WHERE linked.TransactionId IS NULL
+                  AND CASE WHEN account.Last4 = '8027'
+                           THEN transactionDate.UnixSeconds
+                           ELSE postingDate.UnixSeconds END >= $start
+                  AND CASE WHEN account.Last4 = '8027'
+                           THEN transactionDate.UnixSeconds
+                           ELSE postingDate.UnixSeconds END < $end
+                LIMIT 1
+            );
+            """;
+        AddYearParameters(command, year);
+
+        return Convert.ToInt64(
+            command.ExecuteScalar(),
+            CultureInfo.InvariantCulture) != 0;
+    }
+
+    public static bool HasAccountingChangesAfter(
+        int year,
+        DateTimeOffset timestamp)
+    {
+        ValidateYear(year);
+
+        using SqliteConnection connection = Database.OpenConnection();
+        using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT COALESCE(MAX(modified.UnixSeconds), 0)
+            FROM AccountingEntries entry
+            JOIN AccountingDateValues entryDate ON entryDate.Id = entry.EntryDateId
+            JOIN TimestampValues modified ON modified.Id = entry.ModifiedTimestampId
+            WHERE entryDate.UnixSeconds >= $start
+              AND entryDate.UnixSeconds < $end;
+            """;
+        AddYearParameters(command, year);
+
+        long latest = Convert.ToInt64(
+            command.ExecuteScalar(),
+            CultureInfo.InvariantCulture);
+
+        return latest > timestamp.ToUnixTimeSeconds();
+    }
+
     public static IReadOnlyList<AccountingEntry> ReadEntries(int year)
     {
         ValidateYear(year);
