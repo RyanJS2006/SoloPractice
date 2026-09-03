@@ -45,7 +45,7 @@ internal static class Program
                     break;
 
                 case MainMenuAction.AccountingWorksheet:
-                    NotImplemented("Accounting worksheet");
+                    GenerateAccountingWorksheet();
                     break;
 
                 case MainMenuAction.ReceiptScans:
@@ -542,6 +542,94 @@ internal static class Program
         Console.WriteLine();
         Console.Write("> ");
         Console.Write(buffer.ToString());
+    }
+
+    private static void GenerateAccountingWorksheet()
+    {
+        ClearForRedraw();
+        Console.CursorVisible = false;
+
+        DrawHeader();
+
+        Console.ForegroundColor = ConsoleColor.Green;
+        Console.WriteLine();
+        Console.WriteLine("Generate / Update Accounting Spreadsheet");
+        Console.WriteLine();
+
+        try
+        {
+            int year = DateTime.Today.Year;
+
+            Console.ForegroundColor = ConsoleColor.Gray;
+            Console.WriteLine(
+                $"Building the {year} workbook from SoloPractice.db...");
+            Console.WriteLine();
+
+            AccountingWorksheetResult result =
+                AccountingWorksheetGenerator.GenerateOrUpdate(year);
+
+            Console.ForegroundColor = ConsoleColor.Green;
+            Console.WriteLine(
+                result.ReplacedExistingWorkbook
+                    ? "Accounting workbook updated successfully."
+                    : "Accounting workbook generated successfully.");
+
+            Console.ForegroundColor = ConsoleColor.Gray;
+            Console.WriteLine();
+            Console.WriteLine(
+                $"Checking rows:    {result.CheckingRows:N0}");
+            Console.WriteLine(
+                $"Savings rows:     {result.SavingsRows:N0}");
+            Console.WriteLine(
+                $"Credit-card rows: {result.CreditCardRows:N0}");
+            Console.WriteLine(
+                $"Rows to review:   {result.ReviewRows:N0}");
+            Console.WriteLine();
+            Console.WriteLine(result.WorkbookPath);
+
+            if (result.ReviewRows > 0)
+            {
+                Console.ForegroundColor = ConsoleColor.Yellow;
+                Console.WriteLine();
+                Console.WriteLine(
+                    "Rows highlighted in yellow still need an accounting decision.");
+            }
+        }
+        catch (Exception exception)
+        {
+            Console.ForegroundColor = ConsoleColor.Red;
+            Console.WriteLine(
+                "Could not generate the accounting workbook.");
+            Console.WriteLine();
+
+            Console.ForegroundColor = ConsoleColor.White;
+            Console.WriteLine(exception.Message);
+
+#if DEBUG
+            Console.ForegroundColor = ConsoleColor.DarkGray;
+            Console.WriteLine();
+            Console.WriteLine(exception);
+#endif
+        }
+
+        Console.ForegroundColor = ConsoleColor.DarkGray;
+        Console.WriteLine();
+        Console.Write("Press ");
+
+        Console.ForegroundColor = ConsoleColor.Black;
+        Console.BackgroundColor = ConsoleColor.Cyan;
+        Console.Write("[Esc]");
+        Console.BackgroundColor = ConsoleColor.Black;
+
+        Console.ForegroundColor = ConsoleColor.DarkGray;
+        Console.WriteLine(" to go back.");
+
+        while (Console.ReadKey(intercept: true).Key !=
+               ConsoleKey.Escape)
+        {
+        }
+
+        Console.ResetColor();
     }
 
     private static void NotImplemented(
