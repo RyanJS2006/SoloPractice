@@ -44,9 +44,12 @@ internal static class Program
                 int year = args.Length >= 2
                     ? int.Parse(args[1], System.Globalization.CultureInfo.InvariantCulture)
                     : DateTime.Today.Year;
+                AppPaths.EnsureAccountingYearDirectoriesExist(year);
                 string path = args.Length >= 3
                     ? Path.GetFullPath(args[2])
                     : AccountingWorkbookService.GetWorkbookPath(year);
+
+                DatabaseBackupService.CreateVerifiedBackup();
 
                 AccountingWorkbookSyncResult? imported = null;
                 bool legacy = File.Exists(path) &&
@@ -72,7 +75,9 @@ internal static class Program
             if (args[0].Equals("--accounting-sync", StringComparison.OrdinalIgnoreCase) && args.Length == 3)
             {
                 int year = int.Parse(args[1], System.Globalization.CultureInfo.InvariantCulture);
+                AppPaths.EnsureAccountingYearDirectoriesExist(year);
                 string path = Path.GetFullPath(args[2]);
+                DatabaseBackupService.CreateVerifiedBackup();
                 AccountingWorkbookSyncResult sync = AccountingWorkbookService.ImportWorkbookEdits(year, path);
                 AccountingWorkbookService.Generate(year, path);
                 Console.WriteLine(
@@ -392,6 +397,8 @@ internal static class Program
     {
         try
         {
+            DatabaseBackupService.CreateVerifiedBackup();
+
             ChaseImportResult result =
                 ChaseCsvImporter.Import(path);
 
@@ -626,12 +633,22 @@ internal static class Program
         try
         {
             int year = DateTime.Today.Year;
+            AppPaths.EnsureAccountingYearDirectoriesExist(year);
             string workbookPath = AccountingWorkbookService.GetWorkbookPath(year);
 
             Console.ForegroundColor = ConsoleColor.Gray;
             Console.WriteLine(
                 $"Updating the {year} accounting ledger from SoloPractice.db...");
             Console.WriteLine();
+
+            DatabaseBackupResult? backup =
+                DatabaseBackupService.CreateVerifiedBackup();
+            if (backup is not null)
+            {
+                Console.WriteLine(
+                    $"Verified database backup: {backup.BackupPath}");
+                Console.WriteLine();
+            }
 
             AccountingWorkbookSyncResult? preSync = null;
             bool legacyWorkbook = false;

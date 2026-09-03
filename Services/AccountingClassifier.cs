@@ -132,7 +132,7 @@ internal static class AccountingClassifier
             if (to && (row.TransferLast4 == "0231" || row.TransferLast4 == "8153"))
                 return Auto("checking:owners-draw", "Owners Draw", "Owners Draw", true);
             if (to && row.TransferLast4 == SavingsAccount)
-                return Auto("checking:transfer-to-savings", $"Transfer to Savings *{SavingsAccount}", "Credit Card Payment, Transfers out and non-deductible exp", true);
+                return Auto("checking:transfer-to-savings", $"Transfer to Savings *{SavingsAccount}", "Transfers Out", true);
             if (from && row.TransferLast4 == SavingsAccount)
                 return Auto("checking:transfer-from-savings", $"Transfer from Savings *{SavingsAccount}", "Transfers In", true);
 
@@ -147,7 +147,7 @@ internal static class AccountingClassifier
         }
 
         if (type == "LOAN_PMT" && row.TargetCardLast4 == CreditCardAccount)
-            return Auto("checking:chase-card-payment", "Payment to Chase card", "Credit Card Payment, Transfers out and non-deductible exp", true);
+            return Auto("checking:chase-card-payment", "Payment to Chase card", "Credit Card Payment", true);
 
         if (type == "ACH_DEBIT")
         {
@@ -201,7 +201,7 @@ internal static class AccountingClassifier
         {
             string merchant = row.DebitMerchant ?? string.Empty;
             if (merchant.Contains("MATRIX", StringComparison.OrdinalIgnoreCase))
-                return Auto($"checking:matrix:{row.TransactionId}", "CEUs workshops - MATRIX CEUMATRIX.COM", "Licenses & Dues", false);
+                return Auto($"checking:matrix:{row.TransactionId}", "CEUs workshops - MATRIX CEUMATRIX.COM", "Continuing Ed", false);
             if (merchant.Contains("XFINITY", StringComparison.OrdinalIgnoreCase))
                 return Auto($"checking:xfinity:{row.TransactionId}", merchant, "WiFi Fee", false);
 
@@ -255,7 +255,7 @@ internal static class AccountingClassifier
         string upper = merchant.ToUpperInvariant();
 
         if (row.TypeCode.Equals("Payment", StringComparison.OrdinalIgnoreCase))
-            return Auto("card:payment", "payment", "Credit Card Pmt", false);
+            return Auto("card:payment", "payment", "Credit Card Payment", false);
         if (upper.Contains("PSYCHOLOGY TODAY"))
             return Auto("card:psychology-today", "Psychology Today advertisement", "Advertising", false);
         if (upper.Contains("SIMPLEPRACTICE"))

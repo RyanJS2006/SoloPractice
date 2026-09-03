@@ -39,95 +39,27 @@
     When Visual Studio finishes a normal Release build, publish
     self-contained versions for every supported platform.
   -->
-	<Target
-	  Name="PublishAllReleasePlatforms"
-	  AfterTargets="Build"
-	  Condition="
-      '$(Configuration)' == 'Release'
-      and '$(RuntimeIdentifier)' == ''
-      and '$(SkipMultiPlatformPublish)' != 'true'">
+	<Target Name="PublishAllReleasePlatforms" AfterTargets="Build" Condition="&#xD;&#xA;      '$(Configuration)' == 'Release'&#xD;&#xA;      and '$(RuntimeIdentifier)' == ''&#xD;&#xA;      and '$(SkipMultiPlatformPublish)' != 'true'">
 
-		<Message
-		  Importance="high"
-		  Text="Publishing SoloPractice for Windows, macOS, and Linux..." />
+		<Message Importance="high" Text="Publishing SoloPractice for Windows, macOS, and Linux..." />
 
 		<!-- Windows x64 -->
-		<MSBuild
-		  Projects="$(MSBuildProjectFullPath)"
-		  Targets="Publish"
-		  Properties="
-        Configuration=Release;
-        RuntimeIdentifier=win-x64;
-        SelfContained=true;
-        PublishSingleFile=true;
-        IncludeNativeLibrariesForSelfExtract=true;
-        PublishDir=$(MSBuildProjectDirectory)/publish/win-x64/;
-        SkipMultiPlatformPublish=true" />
+		<MSBuild Projects="$(MSBuildProjectFullPath)" Targets="Publish" Properties="&#xD;&#xA;        Configuration=Release;&#xD;&#xA;        RuntimeIdentifier=win-x64;&#xD;&#xA;        SelfContained=true;&#xD;&#xA;        PublishSingleFile=true;&#xD;&#xA;        IncludeNativeLibrariesForSelfExtract=true;&#xD;&#xA;        PublishDir=$(MSBuildProjectDirectory)/publish/win-x64/;&#xD;&#xA;        SkipMultiPlatformPublish=true" />
 
 		<!-- Windows ARM64 -->
-		<MSBuild
-		  Projects="$(MSBuildProjectFullPath)"
-		  Targets="Publish"
-		  Properties="
-        Configuration=Release;
-        RuntimeIdentifier=win-arm64;
-        SelfContained=true;
-        PublishSingleFile=true;
-        IncludeNativeLibrariesForSelfExtract=true;
-        PublishDir=$(MSBuildProjectDirectory)/publish/win-arm64/;
-        SkipMultiPlatformPublish=true" />
+		<MSBuild Projects="$(MSBuildProjectFullPath)" Targets="Publish" Properties="&#xD;&#xA;        Configuration=Release;&#xD;&#xA;        RuntimeIdentifier=win-arm64;&#xD;&#xA;        SelfContained=true;&#xD;&#xA;        PublishSingleFile=true;&#xD;&#xA;        IncludeNativeLibrariesForSelfExtract=true;&#xD;&#xA;        PublishDir=$(MSBuildProjectDirectory)/publish/win-arm64/;&#xD;&#xA;        SkipMultiPlatformPublish=true" />
 
 		<!-- macOS Apple Silicon -->
-		<MSBuild
-		  Projects="$(MSBuildProjectFullPath)"
-		  Targets="Publish"
-		  Properties="
-        Configuration=Release;
-        RuntimeIdentifier=osx-arm64;
-        SelfContained=true;
-        PublishSingleFile=true;
-        IncludeNativeLibrariesForSelfExtract=true;
-        PublishDir=$(MSBuildProjectDirectory)/publish/osx-arm64/;
-        SkipMultiPlatformPublish=true" />
+		<MSBuild Projects="$(MSBuildProjectFullPath)" Targets="Publish" Properties="&#xD;&#xA;        Configuration=Release;&#xD;&#xA;        RuntimeIdentifier=osx-arm64;&#xD;&#xA;        SelfContained=true;&#xD;&#xA;        PublishSingleFile=true;&#xD;&#xA;        IncludeNativeLibrariesForSelfExtract=true;&#xD;&#xA;        PublishDir=$(MSBuildProjectDirectory)/publish/osx-arm64/;&#xD;&#xA;        SkipMultiPlatformPublish=true" />
 
 		<!-- macOS Intel -->
-		<MSBuild
-		  Projects="$(MSBuildProjectFullPath)"
-		  Targets="Publish"
-		  Properties="
-        Configuration=Release;
-        RuntimeIdentifier=osx-x64;
-        SelfContained=true;
-        PublishSingleFile=true;
-        IncludeNativeLibrariesForSelfExtract=true;
-        PublishDir=$(MSBuildProjectDirectory)/publish/osx-x64/;
-        SkipMultiPlatformPublish=true" />
+		<MSBuild Projects="$(MSBuildProjectFullPath)" Targets="Publish" Properties="&#xD;&#xA;        Configuration=Release;&#xD;&#xA;        RuntimeIdentifier=osx-x64;&#xD;&#xA;        SelfContained=true;&#xD;&#xA;        PublishSingleFile=true;&#xD;&#xA;        IncludeNativeLibrariesForSelfExtract=true;&#xD;&#xA;        PublishDir=$(MSBuildProjectDirectory)/publish/osx-x64/;&#xD;&#xA;        SkipMultiPlatformPublish=true" />
 
 		<!-- Linux x64 -->
-		<MSBuild
-		  Projects="$(MSBuildProjectFullPath)"
-		  Targets="Publish"
-		  Properties="
-        Configuration=Release;
-        RuntimeIdentifier=linux-x64;
-        SelfContained=true;
-        PublishSingleFile=true;
-        IncludeNativeLibrariesForSelfExtract=true;
-        PublishDir=$(MSBuildProjectDirectory)/publish/linux-x64/;
-        SkipMultiPlatformPublish=true" />
+		<MSBuild Projects="$(MSBuildProjectFullPath)" Targets="Publish" Properties="&#xD;&#xA;        Configuration=Release;&#xD;&#xA;        RuntimeIdentifier=linux-x64;&#xD;&#xA;        SelfContained=true;&#xD;&#xA;        PublishSingleFile=true;&#xD;&#xA;        IncludeNativeLibrariesForSelfExtract=true;&#xD;&#xA;        PublishDir=$(MSBuildProjectDirectory)/publish/linux-x64/;&#xD;&#xA;        SkipMultiPlatformPublish=true" />
 
 		<!-- Linux ARM64 -->
-		<MSBuild
-		  Projects="$(MSBuildProjectFullPath)"
-		  Targets="Publish"
-		  Properties="
-        Configuration=Release;
-        RuntimeIdentifier=linux-arm64;
-        SelfContained=true;
-        PublishSingleFile=true;
-        IncludeNativeLibrariesForSelfExtract=true;
-        PublishDir=$(MSBuildProjectDirectory)/publish/linux-arm64/;
-        SkipMultiPlatformPublish=true" />
+		<MSBuild Projects="$(MSBuildProjectFullPath)" Targets="Publish" Properties="&#xD;&#xA;        Configuration=Release;&#xD;&#xA;        RuntimeIdentifier=linux-arm64;&#xD;&#xA;        SelfContained=true;&#xD;&#xA;        PublishSingleFile=true;&#xD;&#xA;        IncludeNativeLibrariesForSelfExtract=true;&#xD;&#xA;        PublishDir=$(MSBuildProjectDirectory)/publish/linux-arm64/;&#xD;&#xA;        SkipMultiPlatformPublish=true" />
 
 	</Target>
 

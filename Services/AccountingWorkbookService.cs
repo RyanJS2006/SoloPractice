@@ -50,13 +50,14 @@ internal static class AccountingWorkbookService
     ];
 
     public static string GetWorkbookPath(int year) =>
-        Path.Combine(AppPaths.ApplicationDirectory, $"{year} Accounting Worksheet.xlsx");
+        AppPaths.GetWorkbookPath(year);
 
     public static AccountingWorkbookResult Generate(
         int year,
         string? workbookPath = null,
         bool openAfterSaving = false)
     {
+        AppPaths.EnsureAccountingYearDirectoriesExist(year);
         workbookPath ??= GetWorkbookPath(year);
         string? directory = Path.GetDirectoryName(Path.GetFullPath(workbookPath));
         if (!string.IsNullOrWhiteSpace(directory))
@@ -155,7 +156,10 @@ internal static class AccountingWorkbookService
                 bool needsReview = categoryId is null ||
                     (!string.IsNullOrWhiteSpace(row.Explanation) &&
                      row.Explanation.StartsWith("REVIEW:", StringComparison.OrdinalIgnoreCase));
-                string now = DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture);
+                long timestampId = AccountingLookup.GetOrCreateTimestamp(
+                    connection,
+                    transaction,
+                    DateTimeOffset.UtcNow.ToUnixTimeSeconds());
 
                 if (row.EntryId.HasValue)
                 {
@@ -196,7 +200,7 @@ internal static class AccountingWorkbookService
                                 CategoryId = $category,
                                 CheckNumberId = $check,
                                 NeedsReview = $review,
-                                ModifiedAtUtc = $now
+                                ModifiedTimestampId = $timestamp
                             WHERE Id = $id;
                             """;
                         AddEntryValueParameters(
@@ -209,7 +213,7 @@ internal static class AccountingWorkbookService
                             categoryId,
                             checkNumberId,
                             needsReview,
-                            now);
+                            timestampId);
                         update.ExecuteNonQuery();
                         updatedRows++;
                     }
@@ -224,13 +228,14 @@ internal static class AccountingWorkbookService
                         (
                             AccountId, EntryDateId, AmountId, DescriptionTextId,
                             ExplanationTextId, CategoryId, CheckNumberId, DisplayOrder,
-                            IsManual, NeedsReview, IsSuppressed, CreatedAtUtc, ModifiedAtUtc
+                            IsManual, NeedsReview, IsSuppressed,
+                            CreatedTimestampId, ModifiedTimestampId
                         )
                         VALUES
                         (
                             $account, $date, $amount, $description,
                             $explanation, $category, $check, $order,
-                            1, $review, 0, $now, $now
+                            1, $review, 0, $timestamp, $timestamp
                         );
                         """;
                     insert.Parameters.AddWithValue("$account", accountId);
@@ -245,7 +250,7 @@ internal static class AccountingWorkbookService
                         categoryId,
                         checkNumberId,
                         needsReview,
-                        now);
+                        timestampId);
                     insert.ExecuteNonQuery();
                     insertedRows++;
                 }
@@ -371,14 +376,19 @@ internal static class AccountingWorkbookService
                         ExplanationTextId = $explanation,
                         CategoryId = $category,
                         NeedsReview = $review,
-                        ModifiedAtUtc = $now
+                        ModifiedTimestampId = $timestamp
                     WHERE Id = $id;
                     """;
                 update.Parameters.AddWithValue("$description", descriptionId);
                 update.Parameters.AddWithValue("$explanation", (object?)explanationId ?? DBNull.Value);
                 update.Parameters.AddWithValue("$category", (object?)categoryId ?? DBNull.Value);
                 update.Parameters.AddWithValue("$review", needsReview ? 1 : 0);
-                update.Parameters.AddWithValue("$now", DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture));
+                update.Parameters.AddWithValue(
+                    "$timestamp",
+                    AccountingLookup.GetOrCreateTimestamp(
+                        connection,
+                        transaction,
+                        DateTimeOffset.UtcNow.ToUnixTimeSeconds()));
                 update.Parameters.AddWithValue("$id", entryId);
                 update.ExecuteNonQuery();
                 updated++;
@@ -793,7 +803,7 @@ internal static class AccountingWorkbookService
         ws.Range(totalRow, 2, totalRow, 3).Style.Border.TopBorder =
             XLBorderStyleValues.Medium;
 
-        // Keep the Dr./Cr. label as one clean vertical block, matching the reference.
+        // One solid side label, matching the requested Dr./Cr. block.
         ws.Range(firstRow, 1, totalRow, 1).Merge();
         ws.Cell(firstRow, 1).Value = sideLabel;
         ws.Cell(firstRow, 1).Style.Fill.BackgroundColor = strongColor;
@@ -805,9 +815,14 @@ internal static class AccountingWorkbookService
         ws.Cell(firstRow, 1).Style.Alignment.Vertical =
             XLAlignmentVerticalValues.Center;
 
+        // Strong outer frame, a clear divider after the Dr./Cr. block, and
+        // restrained row separators through only Category/Total.
         ws.Range(firstRow, 1, totalRow, 3).Style.Border.OutsideBorder =
+            XLBorderStyleValues.Medium;
+        ws.Range(firstRow, 1, totalRow, 1).Style.Border.RightBorder =
+            XLBorderStyleValues.Medium;
+        ws.Range(firstRow, 2, totalRow, 2).Style.Border.RightBorder =
             XLBorderStyleValues.Thin;
-        ws.Range(firstRow, 1, totalRow, 3).Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
 
         for (int separatorRow = firstRow; separatorRow < totalRow; separatorRow++)
         {
@@ -843,14 +858,22 @@ internal static class AccountingWorkbookService
             XLAlignmentHorizontalValues.Center;
         ws.Row(1).Height = 22;
 
-        // Turn the visible ledger into a real Excel table. This gives it filters,
-        // banded rows, and a polished built-in style while keeping the hidden IDs
-        // outside the visible table.
+        // Use an Excel table for filtering/banding, then add a slightly stronger
+        // frame so the ledger reads as one intentional block.
         IXLTable table = ws.Range(HeaderRow, 1, lastDataRow, 7)
             .CreateTable($"AccountingEntries_{accountLast4}_{year}");
         table.Theme = XLTableTheme.TableStyleMedium2;
         table.ShowAutoFilter = true;
         table.ShowRowStripes = true;
+
+        ApplyGridBorders(
+            ws,
+            HeaderRow,
+            1,
+            lastDataRow,
+            7,
+            XLBorderStyleValues.Medium,
+            XLBorderStyleValues.Thin);
 
         ws.Range(FirstDataRow, 1, lastDataRow, 1).Style.NumberFormat.Format =
             "mm/dd/yyyy";
@@ -885,6 +908,46 @@ internal static class AccountingWorkbookService
         // A little breathing room before the summary.
         ws.Row(summaryHeaderRow - 2).Height = 8;
         ws.Row(summaryHeaderRow - 1).Height = 8;
+
+        // Give the category-summary header the same framed feel as the ledger.
+        ws.Range(summaryHeaderRow, 2, summaryHeaderRow, 3).Style.Border.TopBorder =
+            XLBorderStyleValues.Medium;
+        ws.Range(summaryHeaderRow, 2, summaryHeaderRow, 3).Style.Border.BottomBorder =
+            XLBorderStyleValues.Medium;
+        ws.Range(summaryHeaderRow, 2, summaryHeaderRow, 2).Style.Border.LeftBorder =
+            XLBorderStyleValues.Medium;
+        ws.Range(summaryHeaderRow, 3, summaryHeaderRow, 3).Style.Border.RightBorder =
+            XLBorderStyleValues.Medium;
+        ws.Range(summaryHeaderRow, 2, summaryHeaderRow, 2).Style.Border.RightBorder =
+            XLBorderStyleValues.Thin;
+    }
+
+    private static void ApplyGridBorders(
+        IXLWorksheet ws,
+        int firstRow,
+        int firstColumn,
+        int lastRow,
+        int lastColumn,
+        XLBorderStyleValues outerBorder,
+        XLBorderStyleValues innerBorder)
+    {
+        if (lastRow < firstRow || lastColumn < firstColumn)
+            return;
+
+        ws.Range(firstRow, firstColumn, lastRow, lastColumn)
+            .Style.Border.OutsideBorder = outerBorder;
+
+        for (int row = firstRow; row < lastRow; row++)
+        {
+            ws.Range(row, firstColumn, row, lastColumn)
+                .Style.Border.BottomBorder = innerBorder;
+        }
+
+        for (int column = firstColumn; column < lastColumn; column++)
+        {
+            ws.Range(firstRow, column, lastRow, column)
+                .Style.Border.RightBorder = innerBorder;
+        }
     }
 
     private static void BuildTrialBalances(
@@ -894,56 +957,163 @@ internal static class AccountingWorkbookService
         IReadOnlyList<AccountingCategory> categories)
     {
         IXLWorksheet ws = workbook.Worksheets.Add($"{year} Trial Balances");
-        ws.Cell(1, 1).Value = "Yolanda Solecki LCPC LLC";
-        ws.Cell(2, 1).Value = "Year-to-Date Combined Trial Balance (database calculated)";
-        ws.Cell(4, 1).Value = "Account";
-        ws.Cell(4, 2).Value = "Opening Balance";
-        ws.Cell(4, 3).Value = "Year Activity";
-        ws.Cell(4, 4).Value = "Ending Balance";
 
-        int accountRow = 5;
+        XLColor titleColor = XLColor.FromHtml("#1F4E78");
+        XLColor subtitleColor = XLColor.FromHtml("#D9EAF7");
+        XLColor debitStrong = XLColor.FromHtml("#C0504D");
+        XLColor debitLight = XLColor.FromHtml("#F2DCDB");
+        XLColor creditStrong = XLColor.FromHtml("#4F81BD");
+        XLColor creditLight = XLColor.FromHtml("#DCE6F1");
+        XLColor neutralLight = XLColor.FromHtml("#F2F2F2");
+
+        // Workbook title.
+        ws.Range(1, 1, 1, 9).Merge();
+        ws.Cell(1, 1).Value = "Yolanda Solecki LCPC LLC";
+        ws.Range(1, 1, 1, 9).Style.Fill.BackgroundColor = titleColor;
+        ws.Range(1, 1, 1, 9).Style.Font.FontColor = XLColor.White;
+        ws.Range(1, 1, 1, 9).Style.Font.Bold = true;
+        ws.Range(1, 1, 1, 9).Style.Font.FontSize = 16;
+        ws.Range(1, 1, 1, 9).Style.Alignment.Horizontal =
+            XLAlignmentHorizontalValues.Center;
+        ws.Range(1, 1, 1, 9).Style.Alignment.Vertical =
+            XLAlignmentVerticalValues.Center;
+        ws.Row(1).Height = 28;
+
+        ws.Range(2, 1, 2, 9).Merge();
+        ws.Cell(2, 1).Value =
+            $"Tax Year {year} • Year-to-Date Combined Trial Balance • Database Calculated";
+        ws.Range(2, 1, 2, 9).Style.Fill.BackgroundColor = subtitleColor;
+        ws.Range(2, 1, 2, 9).Style.Font.Bold = true;
+        ws.Range(2, 1, 2, 9).Style.Alignment.Horizontal =
+            XLAlignmentHorizontalValues.Center;
+        ws.Row(2).Height = 21;
+
+        // Account-balance overview.
+        const int accountHeaderRow = 4;
+        ws.Cell(accountHeaderRow, 1).Value = "Account";
+        ws.Cell(accountHeaderRow, 2).Value = "Opening Balance";
+        ws.Cell(accountHeaderRow, 3).Value = "Year Activity";
+        ws.Cell(accountHeaderRow, 4).Value = "Ending Balance";
+
+        ws.Range(accountHeaderRow, 1, accountHeaderRow, 4)
+            .Style.Fill.BackgroundColor = titleColor;
+        ws.Range(accountHeaderRow, 1, accountHeaderRow, 4)
+            .Style.Font.FontColor = XLColor.White;
+        ws.Range(accountHeaderRow, 1, accountHeaderRow, 4).Style.Font.Bold = true;
+        ws.Range(accountHeaderRow, 1, accountHeaderRow, 4)
+            .Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+
+        int accountRow = accountHeaderRow + 1;
         foreach (var account in Accounts)
         {
             long activity = entries
-                .Where(entry => entry.AccountLast4 == account.Last4 && !entry.IsOpeningBalance)
+                .Where(entry =>
+                    entry.AccountLast4 == account.Last4 &&
+                    !entry.IsOpeningBalance)
                 .Sum(entry => entry.AmountCents);
+
             long opening = entries.Single(entry =>
-                entry.AccountLast4 == account.Last4 && entry.IsOpeningBalance).AmountCents;
+                entry.AccountLast4 == account.Last4 &&
+                entry.IsOpeningBalance).AmountCents;
+
             ws.Cell(accountRow, 1).Value = account.Title;
             ws.Cell(accountRow, 2).Value = CentsToDecimal(opening);
             ws.Cell(accountRow, 3).Value = CentsToDecimal(activity);
             ws.Cell(accountRow, 4).Value = CentsToDecimal(opening + activity);
+
+            if (((accountRow - accountHeaderRow) & 1) == 0)
+            {
+                ws.Range(accountRow, 1, accountRow, 4)
+                    .Style.Fill.BackgroundColor = neutralLight;
+            }
+
             accountRow++;
         }
 
+        int accountLastRow = accountRow - 1;
+        ApplyGridBorders(
+            ws,
+            accountHeaderRow,
+            1,
+            accountLastRow,
+            4,
+            XLBorderStyleValues.Medium,
+            XLBorderStyleValues.Thin);
+
+        ws.Range(accountHeaderRow + 1, 2, accountLastRow, 4)
+            .Style.NumberFormat.Format = "$#,##0.00;[Red]-$#,##0.00";
+        ws.Range(accountHeaderRow + 1, 1, accountLastRow, 1).Style.Font.Bold = true;
+
+        // Category trial balance.
         const int tableRow = 10;
         string[] headers =
         [
-            "Accounting Category", "Checking Dr.", "Checking Cr.",
-            "Savings Dr.", "Savings Cr.", "Chase Visa Dr.", "Chase Visa Cr.",
+            "Accounting Category",
+            "Checking Dr.", "Checking Cr.",
+            "Savings Dr.", "Savings Cr.",
+            "Chase Visa Dr.", "Chase Visa Cr.",
             "Combined Dr.", "Combined Cr."
         ];
+
         for (int i = 0; i < headers.Length; i++)
             ws.Cell(tableRow, i + 1).Value = headers[i];
 
+        ws.Cell(tableRow, 1).Style.Fill.BackgroundColor = titleColor;
+        ws.Cell(tableRow, 1).Style.Font.FontColor = XLColor.White;
+
+        int[] debitColumns = [2, 4, 6, 8];
+        int[] creditColumns = [3, 5, 7, 9];
+
+        foreach (int column in debitColumns)
+        {
+            ws.Cell(tableRow, column).Style.Fill.BackgroundColor = debitStrong;
+            ws.Cell(tableRow, column).Style.Font.FontColor = XLColor.White;
+        }
+
+        foreach (int column in creditColumns)
+        {
+            ws.Cell(tableRow, column).Style.Fill.BackgroundColor = creditStrong;
+            ws.Cell(tableRow, column).Style.Font.FontColor = XLColor.White;
+        }
+
+        ws.Range(tableRow, 1, tableRow, 9).Style.Font.Bold = true;
+        ws.Range(tableRow, 1, tableRow, 9)
+            .Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+        ws.Range(tableRow, 1, tableRow, 9)
+            .Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
+        ws.Range(tableRow, 1, tableRow, 9).Style.Alignment.WrapText = true;
+        ws.Row(tableRow).Height = 30;
+
         int rowNumber = tableRow + 1;
+
+        // Show every active category, including zero-dollar categories, so the
+        // trial balance has the same stable category vocabulary as account sheets.
         foreach (AccountingCategory category in categories)
         {
             List<AccountingEntry> categoryEntries = entries
-                .Where(entry => !entry.IsOpeningBalance &&
-                    string.Equals(entry.Category, category.Name, StringComparison.OrdinalIgnoreCase))
+                .Where(entry =>
+                    !entry.IsOpeningBalance &&
+                    string.Equals(
+                        entry.Category,
+                        category.Name,
+                        StringComparison.OrdinalIgnoreCase))
                 .ToList();
-            if (categoryEntries.Count == 0)
-                continue;
 
             ws.Cell(rowNumber, 1).Value = category.Name;
+
+            decimal combinedDebit = 0;
+            decimal combinedCredit = 0;
+
             for (int accountIndex = 0; accountIndex < Accounts.Length; accountIndex++)
             {
                 List<AccountingEntry> accountEntries = categoryEntries
-                    .Where(entry => entry.AccountLast4 == Accounts[accountIndex].Last4)
+                    .Where(entry =>
+                        entry.AccountLast4 == Accounts[accountIndex].Last4)
                     .ToList();
+
                 long debit = 0;
                 long credit = 0;
+
                 foreach (AccountingEntry entry in accountEntries)
                 {
                     bool isDebit = category.NormalSide switch
@@ -952,43 +1122,99 @@ internal static class AccountingWorkbookService
                         "CREDIT" => false,
                         _ => entry.AmountCents < 0
                     };
+
                     if (isDebit)
                         debit += Math.Abs(entry.AmountCents);
                     else
                         credit += Math.Abs(entry.AmountCents);
                 }
 
-                ws.Cell(rowNumber, 2 + accountIndex * 2).Value = CentsToDecimal(debit);
-                ws.Cell(rowNumber, 3 + accountIndex * 2).Value = CentsToDecimal(credit);
+                decimal debitValue = CentsToDecimal(debit);
+                decimal creditValue = CentsToDecimal(credit);
+
+                ws.Cell(rowNumber, 2 + accountIndex * 2).Value = debitValue;
+                ws.Cell(rowNumber, 3 + accountIndex * 2).Value = creditValue;
+
+                combinedDebit += debitValue;
+                combinedCredit += creditValue;
             }
 
-            ws.Cell(rowNumber, 8).Value = ws.Range(rowNumber, 2, rowNumber, 6).Cells().Where((_, index) => index % 2 == 0).Sum(cell => cell.GetValue<decimal>());
-            ws.Cell(rowNumber, 9).Value = ws.Range(rowNumber, 3, rowNumber, 7).Cells().Where((_, index) => index % 2 == 0).Sum(cell => cell.GetValue<decimal>());
+            ws.Cell(rowNumber, 8).Value = combinedDebit;
+            ws.Cell(rowNumber, 9).Value = combinedCredit;
+
+            if (((rowNumber - (tableRow + 1)) & 1) == 1)
+            {
+                ws.Cell(rowNumber, 1).Style.Fill.BackgroundColor = neutralLight;
+            }
+
+            foreach (int column in debitColumns)
+                ws.Cell(rowNumber, column).Style.Fill.BackgroundColor = debitLight;
+
+            foreach (int column in creditColumns)
+                ws.Cell(rowNumber, column).Style.Fill.BackgroundColor = creditLight;
+
             rowNumber++;
         }
 
         int totalRow = rowNumber;
         ws.Cell(totalRow, 1).Value = "Totals";
+
         for (int column = 2; column <= 9; column++)
         {
-            decimal total = rowNumber == tableRow + 1
+            decimal total = categories.Count == 0
                 ? 0
-                : ws.Range(tableRow + 1, column, rowNumber - 1, column)
+                : ws.Range(tableRow + 1, column, totalRow - 1, column)
                     .Cells()
                     .Sum(cell => cell.GetValue<decimal>());
+
             ws.Cell(totalRow, column).Value = total;
         }
 
-        ws.Range(1, 1, 2, 9).Style.Font.Bold = true;
-        ws.Range(4, 1, 4, 4).Style.Font.Bold = true;
-        ws.Range(4, 1, 4, 4).Style.Fill.BackgroundColor = XLColor.FromHtml("#EDEDED");
-        ws.Range(tableRow, 1, tableRow, 9).Style.Font.Bold = true;
-        ws.Range(tableRow, 1, tableRow, 9).Style.Fill.BackgroundColor = XLColor.FromHtml("#EDEDED");
-        ws.Range(totalRow, 1, totalRow, 9).Style.Font.Bold = true;
-        ws.Range(totalRow, 1, totalRow, 9).Style.Border.TopBorder = XLBorderStyleValues.Thin;
-        ws.Range(5, 2, totalRow, 9).Style.NumberFormat.Format = "$#,##0.00;[Red]-$#,##0.00";
-        ws.Column(1).Width = 38;
+        ws.Cell(totalRow, 1).Style.Fill.BackgroundColor = titleColor;
+        ws.Cell(totalRow, 1).Style.Font.FontColor = XLColor.White;
+        ws.Cell(totalRow, 1).Style.Font.Bold = true;
+
+        foreach (int column in debitColumns)
+        {
+            ws.Cell(totalRow, column).Style.Fill.BackgroundColor = debitStrong;
+            ws.Cell(totalRow, column).Style.Font.FontColor = XLColor.White;
+            ws.Cell(totalRow, column).Style.Font.Bold = true;
+        }
+
+        foreach (int column in creditColumns)
+        {
+            ws.Cell(totalRow, column).Style.Fill.BackgroundColor = creditStrong;
+            ws.Cell(totalRow, column).Style.Font.FontColor = XLColor.White;
+            ws.Cell(totalRow, column).Style.Font.Bold = true;
+        }
+
+        ApplyGridBorders(
+            ws,
+            tableRow,
+            1,
+            totalRow,
+            9,
+            XLBorderStyleValues.Medium,
+            XLBorderStyleValues.Thin);
+
+        // Strong dividers make each account's Dr./Cr. pair visually distinct.
+        foreach (int column in new[] { 1, 3, 5, 7 })
+        {
+            ws.Range(tableRow, column, totalRow, column)
+                .Style.Border.RightBorder = XLBorderStyleValues.Medium;
+        }
+
+        ws.Range(tableRow + 1, 2, totalRow, 9)
+            .Style.NumberFormat.Format = "$#,##0.00;[Red]-$#,##0.00";
+
+        ws.Column(1).Width = 42;
         ws.Columns(2, 9).Width = 16;
+        ws.Range(tableRow + 1, 1, totalRow, 1).Style.Alignment.WrapText = true;
+
+        // Category filtering remains useful on a long trial balance.
+        if (totalRow > tableRow + 1)
+            ws.Range(tableRow, 1, totalRow - 1, 9).SetAutoFilter();
+
         ws.SheetView.FreezeRows(tableRow);
         ws.SheetView.FreezeColumns(1);
     }
@@ -1362,7 +1588,7 @@ internal static class AccountingWorkbookService
         long? categoryId,
         long? checkNumberId,
         bool needsReview,
-        string now)
+        long timestampId)
     {
         if (id.HasValue)
             command.Parameters.AddWithValue("$id", id.Value);
@@ -1373,7 +1599,7 @@ internal static class AccountingWorkbookService
         command.Parameters.AddWithValue("$category", (object?)categoryId ?? DBNull.Value);
         command.Parameters.AddWithValue("$check", (object?)checkNumberId ?? DBNull.Value);
         command.Parameters.AddWithValue("$review", needsReview ? 1 : 0);
-        command.Parameters.AddWithValue("$now", now);
+        command.Parameters.AddWithValue("$timestamp", timestampId);
     }
 
     private static long? GetNullableInt64(SqliteDataReader reader, int ordinal) =>
@@ -1382,14 +1608,26 @@ internal static class AccountingWorkbookService
     private static void SaveCrashSafely(XLWorkbook workbook, string path, bool replacing)
     {
         string tempPath = path + ".tmp.xlsx";
-        string backupPath = path + ".bak";
         try
         {
             if (File.Exists(tempPath))
                 File.Delete(tempPath);
             workbook.SaveAs(tempPath);
             if (replacing)
-                File.Replace(tempPath, path, backupPath, ignoreMetadataErrors: true);
+            {
+                try
+                {
+                    File.Replace(
+                        tempPath,
+                        path,
+                        destinationBackupFileName: null,
+                        ignoreMetadataErrors: true);
+                }
+                catch (PlatformNotSupportedException)
+                {
+                    File.Move(tempPath, path, overwrite: true);
+                }
+            }
             else
                 File.Move(tempPath, path);
         }

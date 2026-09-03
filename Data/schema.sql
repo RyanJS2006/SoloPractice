@@ -1,4 +1,5 @@
 PRAGMA foreign_keys = ON;
+PRAGMA page_size = 512;
 
 -- Lookup/entity tables use surrogate INTEGER primary keys. Human-readable
 -- values remain UNIQUE so the importer can safely resolve them to IDs.
@@ -28,12 +29,6 @@ CREATE TABLE IF NOT EXISTS DateValues
     Id          INTEGER PRIMARY KEY,
     UnixSeconds INTEGER NOT NULL UNIQUE
         CHECK (UnixSeconds % 86400 = 0)
-) STRICT;
-
-CREATE TABLE IF NOT EXISTS MoneyValues
-(
-    Id    INTEGER PRIMARY KEY,
-    Cents INTEGER NOT NULL UNIQUE
 ) STRICT;
 
 CREATE TABLE IF NOT EXISTS TransactionTypes
@@ -89,15 +84,13 @@ CREATE TABLE IF NOT EXISTS Transactions
     Id            INTEGER PRIMARY KEY,
     AccountId     INTEGER NOT NULL,
     PostingDateId INTEGER NOT NULL,
-    AmountId      INTEGER NOT NULL,
+    AmountCents   INTEGER NOT NULL,
     TypeId        INTEGER NOT NULL,
 
     FOREIGN KEY (AccountId)
         REFERENCES Accounts(Id),
     FOREIGN KEY (PostingDateId)
         REFERENCES DateValues(Id),
-    FOREIGN KEY (AmountId)
-        REFERENCES MoneyValues(Id),
     FOREIGN KEY (TypeId)
         REFERENCES TransactionTypes(Id)
 ) STRICT;
@@ -106,16 +99,14 @@ CREATE TABLE IF NOT EXISTS DepositTransactions
 (
     TransactionId   INTEGER PRIMARY KEY,
     DetailsId       INTEGER NOT NULL,
-    BalanceAmountId INTEGER,
+    BalanceCents    INTEGER,
     CheckOrSlipNumber TEXT,
 
     FOREIGN KEY (TransactionId)
         REFERENCES Transactions(Id)
         ON DELETE CASCADE,
     FOREIGN KEY (DetailsId)
-        REFERENCES DepositDetails(Id),
-    FOREIGN KEY (BalanceAmountId)
-        REFERENCES MoneyValues(Id)
+        REFERENCES DepositDetails(Id)
 ) STRICT;
 
 CREATE TABLE IF NOT EXISTS CreditCardTransactions
@@ -157,22 +148,11 @@ CREATE TABLE IF NOT EXISTS AchSecCodes
     Code TEXT NOT NULL UNIQUE
 ) STRICT;
 
-CREATE TABLE IF NOT EXISTS AchTraceNumbers
+CREATE TABLE IF NOT EXISTS AchOdfiIds
 (
-    Id          INTEGER PRIMARY KEY,
-    TraceNumber TEXT NOT NULL UNIQUE
-) STRICT;
-
-CREATE TABLE IF NOT EXISTS AchIndividualIdentifiers
-(
-    Id           INTEGER PRIMARY KEY,
-    IndividualId TEXT NOT NULL UNIQUE
-) STRICT;
-
-CREATE TABLE IF NOT EXISTS AchIndividualNames
-(
-    Id   INTEGER PRIMARY KEY,
-    Name TEXT NOT NULL UNIQUE
+    Id    INTEGER PRIMARY KEY,
+    Value INTEGER NOT NULL UNIQUE
+        CHECK (Value BETWEEN 0 AND 99999999)
 ) STRICT;
 
 -- ACH payment-related information is highly repetitive. Store only the
@@ -222,73 +202,32 @@ SET
     Suffix = excluded.Suffix,
     ReconstructionKind = excluded.ReconstructionKind;
 
-CREATE TABLE IF NOT EXISTS AchPaymentRelatedInformation
-(
-    Id       INTEGER PRIMARY KEY,
-    FormatId INTEGER NOT NULL,
-    Payload  TEXT NOT NULL,
-
-    UNIQUE (FormatId, Payload),
-    FOREIGN KEY (FormatId)
-        REFERENCES AchPaymentInformationFormats(Id)
-) STRICT;
-
-CREATE VIEW IF NOT EXISTS AchPaymentRelatedInformationExpanded AS
-SELECT
-    p.Id,
-    CASE f.ReconstructionKind
-        WHEN 1 THEN
-            f.Prefix
-            || p.Payload
-            || '*1361236610*CP '
-            || strftime(
-                '%Y%m%d',
-                date(
-                    printf(
-                        '%04d-01-01',
-                        2000 + CAST(substr(p.Payload, 2, 2) AS INTEGER)
-                    ),
-                    printf(
-                        '+%d days',
-                        CAST(substr(p.Payload, 4, 3) AS INTEGER) - 1
-                    )
-                )
-            )
-            || substr(p.Payload, 7)
-            || '0-1376879510' || char(92)
-        ELSE
-            f.Prefix || p.Payload || f.Suffix
-    END AS Information
-FROM AchPaymentRelatedInformation p
-JOIN AchPaymentInformationFormats f
-  ON f.Id = p.FormatId;
-
 CREATE TABLE IF NOT EXISTS AchBankReferenceKinds
 (
     Id   INTEGER PRIMARY KEY,
     Name TEXT NOT NULL UNIQUE
 ) STRICT;
 
-CREATE TABLE IF NOT EXISTS AchBankReferences
-(
-    Id        INTEGER PRIMARY KEY,
-    Reference TEXT NOT NULL UNIQUE
-) STRICT;
-
 CREATE TABLE IF NOT EXISTS AchTransactions
 (
-    TransactionId               INTEGER PRIMARY KEY,
-    OriginatorId                INTEGER NOT NULL,
-    CompanyDescriptiveDate      TEXT,
-    EntryDescriptionId          INTEGER NOT NULL,
-    SecCodeId                   INTEGER NOT NULL,
-    TraceNumberId               INTEGER,
-    EffectiveEntryDateId        INTEGER,
-    IndividualIdentifierId      INTEGER,
-    IndividualNameId            INTEGER,
-    PaymentRelatedInformationId INTEGER,
-    BankReferenceKindId         INTEGER,
-    BankReferenceId             INTEGER,
+    TransactionId                  INTEGER PRIMARY KEY,
+    OriginatorId                   INTEGER NOT NULL,
+    CompanyDescriptiveDate         INTEGER,
+    CompanyDescriptiveDateOverride TEXT,
+    EntryDescriptionId             INTEGER NOT NULL,
+    SecCodeId                      INTEGER NOT NULL,
+    TraceOdfiId                    INTEGER,
+    TraceSequence                  INTEGER,
+    TraceNumberOverride            TEXT,
+    EffectiveEntryDateId           INTEGER,
+    IndividualIdentifier           TEXT,
+    IndividualName                 TEXT,
+    PaymentInformationFormatId     INTEGER,
+    PaymentInformationPayload      TEXT,
+    BankReferenceKindId            INTEGER,
+    HasBankReference               INTEGER NOT NULL DEFAULT 0
+        CHECK (HasBankReference IN (0, 1)),
+    BankReferenceOverride          TEXT,
 
     FOREIGN KEY (TransactionId)
         REFERENCES Transactions(Id)
@@ -299,27 +238,96 @@ CREATE TABLE IF NOT EXISTS AchTransactions
         REFERENCES AchEntryDescriptions(Id),
     FOREIGN KEY (SecCodeId)
         REFERENCES AchSecCodes(Id),
-    FOREIGN KEY (TraceNumberId)
-        REFERENCES AchTraceNumbers(Id),
+    FOREIGN KEY (TraceOdfiId)
+        REFERENCES AchOdfiIds(Id),
     FOREIGN KEY (EffectiveEntryDateId)
         REFERENCES DateValues(Id),
-    FOREIGN KEY (IndividualIdentifierId)
-        REFERENCES AchIndividualIdentifiers(Id),
-    FOREIGN KEY (IndividualNameId)
-        REFERENCES AchIndividualNames(Id),
-    FOREIGN KEY (PaymentRelatedInformationId)
-        REFERENCES AchPaymentRelatedInformation(Id),
+    FOREIGN KEY (PaymentInformationFormatId)
+        REFERENCES AchPaymentInformationFormats(Id),
     FOREIGN KEY (BankReferenceKindId)
         REFERENCES AchBankReferenceKinds(Id),
-    FOREIGN KEY (BankReferenceId)
-        REFERENCES AchBankReferences(Id),
 
     CHECK (
-        (BankReferenceKindId IS NULL AND BankReferenceId IS NULL)
-        OR
-        (BankReferenceKindId IS NOT NULL AND BankReferenceId IS NOT NULL)
-    )
+        (CompanyDescriptiveDate IS NULL) !=
+        (CompanyDescriptiveDateOverride IS NULL)
+        OR (CompanyDescriptiveDate IS NULL AND CompanyDescriptiveDateOverride IS NULL)
+    ),
+    CHECK (CompanyDescriptiveDate IS NULL OR CompanyDescriptiveDate BETWEEN 0 AND 999999),
+    CHECK (
+        ((TraceOdfiId IS NULL) = (TraceSequence IS NULL))
+        AND NOT (TraceOdfiId IS NOT NULL AND TraceNumberOverride IS NOT NULL)
+    ),
+    CHECK (TraceSequence IS NULL OR TraceSequence BETWEEN 0 AND 9999999),
+    CHECK (
+        (PaymentInformationFormatId IS NULL) =
+        (PaymentInformationPayload IS NULL)
+    ),
+    CHECK (HasBankReference = 1 OR BankReferenceOverride IS NULL)
 ) STRICT;
+
+CREATE VIEW IF NOT EXISTS AchTransactionsExpanded AS
+SELECT
+    a.TransactionId,
+    a.OriginatorId,
+    originator.CompanyId,
+    originator.CompanyName,
+    CASE
+        WHEN a.CompanyDescriptiveDateOverride IS NOT NULL
+            THEN a.CompanyDescriptiveDateOverride
+        WHEN a.CompanyDescriptiveDate IS NOT NULL
+            THEN printf('%06d', a.CompanyDescriptiveDate)
+    END AS CompanyDescriptiveDate,
+    a.EntryDescriptionId,
+    entryDescription.Description AS EntryDescription,
+    a.SecCodeId,
+    sec.Code AS SecCode,
+    CASE
+        WHEN a.TraceNumberOverride IS NOT NULL THEN a.TraceNumberOverride
+        WHEN a.TraceOdfiId IS NOT NULL
+            THEN printf('%08d%07d', odfi.Value, a.TraceSequence)
+    END AS TraceNumber,
+    a.EffectiveEntryDateId,
+    effectiveDate.UnixSeconds AS EffectiveEntryUnixSeconds,
+    a.IndividualIdentifier AS IndividualId,
+    a.IndividualName,
+    CASE paymentFormat.ReconstructionKind
+        WHEN 1 THEN
+            paymentFormat.Prefix
+            || a.PaymentInformationPayload
+            || '*1361236610*CP '
+            || strftime(
+                '%Y%m%d',
+                date(
+                    printf('%04d-01-01', 2000 + CAST(substr(a.PaymentInformationPayload, 2, 2) AS INTEGER)),
+                    printf('+%d days', CAST(substr(a.PaymentInformationPayload, 4, 3) AS INTEGER) - 1)
+                )
+            )
+            || substr(a.PaymentInformationPayload, 7)
+            || '0-1376879510' || char(92)
+        ELSE paymentFormat.Prefix || a.PaymentInformationPayload || paymentFormat.Suffix
+    END AS PaymentRelatedInformation,
+    a.BankReferenceKindId,
+    bankKind.Name AS BankReferenceKind,
+    CASE
+        WHEN a.HasBankReference = 0 THEN NULL
+        WHEN a.BankReferenceOverride IS NOT NULL THEN a.BankReferenceOverride
+        WHEN a.TraceSequence IS NOT NULL
+            THEN printf(
+                '%03d%07dTC',
+                CAST(strftime('%j', postingDate.UnixSeconds, 'unixepoch') AS INTEGER),
+                a.TraceSequence)
+    END AS BankReference
+FROM AchTransactions a
+JOIN Transactions transactionRow ON transactionRow.Id = a.TransactionId
+JOIN DateValues postingDate ON postingDate.Id = transactionRow.PostingDateId
+JOIN AchOriginators originator ON originator.Id = a.OriginatorId
+JOIN AchEntryDescriptions entryDescription ON entryDescription.Id = a.EntryDescriptionId
+JOIN AchSecCodes sec ON sec.Id = a.SecCodeId
+LEFT JOIN AchOdfiIds odfi ON odfi.Id = a.TraceOdfiId
+LEFT JOIN DateValues effectiveDate ON effectiveDate.Id = a.EffectiveEntryDateId
+LEFT JOIN AchPaymentInformationFormats paymentFormat
+  ON paymentFormat.Id = a.PaymentInformationFormatId
+LEFT JOIN AchBankReferenceKinds bankKind ON bankKind.Id = a.BankReferenceKindId;
 
 CREATE TABLE IF NOT EXISTS TransferDirections
 (
@@ -346,13 +354,16 @@ CREATE TABLE IF NOT EXISTS TransferCounterparties
 
 CREATE TABLE IF NOT EXISTS AccountTransfers
 (
-    TransactionId          INTEGER PRIMARY KEY,
-    DirectionId            INTEGER NOT NULL,
-    IsRealtime             INTEGER NOT NULL
+    TransactionId                 INTEGER PRIMARY KEY,
+    DirectionId                   INTEGER NOT NULL,
+    IsRealtime                    INTEGER NOT NULL
         CHECK (IsRealtime IN (0, 1)),
-    CounterpartyId         INTEGER NOT NULL,
-    ChaseTransactionNumber TEXT NOT NULL,
-    ChaseReference         TEXT,
+    CounterpartyId                INTEGER NOT NULL,
+    ChaseTransactionNumber        INTEGER,
+    ChaseTransactionNumberOverride TEXT,
+    HasChaseReference             INTEGER NOT NULL
+        CHECK (HasChaseReference IN (0, 1)),
+    ChaseReferenceOverride        TEXT,
 
     FOREIGN KEY (TransactionId)
         REFERENCES Transactions(Id)
@@ -360,8 +371,29 @@ CREATE TABLE IF NOT EXISTS AccountTransfers
     FOREIGN KEY (DirectionId)
         REFERENCES TransferDirections(Id),
     FOREIGN KEY (CounterpartyId)
-        REFERENCES TransferCounterparties(Id)
+        REFERENCES TransferCounterparties(Id),
+    CHECK (
+        (ChaseTransactionNumber IS NULL) !=
+        (ChaseTransactionNumberOverride IS NULL)
+    ),
+    CHECK (ChaseTransactionNumber IS NULL OR ChaseTransactionNumber BETWEEN 0 AND 99999999999),
+    CHECK (HasChaseReference = 1 OR ChaseReferenceOverride IS NULL)
 ) STRICT;
+
+CREATE VIEW IF NOT EXISTS AccountTransfersExpanded AS
+SELECT
+    t.TransactionId,
+    t.DirectionId,
+    t.IsRealtime,
+    t.CounterpartyId,
+    COALESCE(t.ChaseTransactionNumberOverride, printf('%011d', t.ChaseTransactionNumber))
+        AS ChaseTransactionNumber,
+    CASE
+        WHEN t.HasChaseReference = 0 THEN NULL
+        WHEN t.ChaseReferenceOverride IS NOT NULL THEN t.ChaseReferenceOverride
+        ELSE '9' || substr(printf('%011d', t.ChaseTransactionNumber), -9) || 'RX'
+    END AS ChaseReference
+FROM AccountTransfers t;
 
 CREATE TABLE IF NOT EXISTS ChaseCardPayments
 (
@@ -437,79 +469,24 @@ CREATE TABLE IF NOT EXISTS UnparsedDepositDescriptions
 
 CREATE TABLE IF NOT EXISTS ImportRows
 (
-    Id              INTEGER PRIMARY KEY,
     ImportFileId    INTEGER NOT NULL,
     SourceRowNumber INTEGER NOT NULL
         CHECK (SourceRowNumber >= 2),
     TransactionId   INTEGER NOT NULL,
 
-    UNIQUE (ImportFileId, SourceRowNumber),
+    PRIMARY KEY (ImportFileId, SourceRowNumber),
     FOREIGN KEY (ImportFileId)
         REFERENCES ImportFiles(Id)
         ON DELETE CASCADE,
     FOREIGN KEY (TransactionId)
         REFERENCES Transactions(Id)
-) STRICT;
-
--- Child-key indexes. These speed joins/deduplication and the lookups SQLite
--- performs while enforcing foreign-key relationships.
-CREATE INDEX IF NOT EXISTS IX_ImportFiles_Account
-    ON ImportFiles(AccountId);
-CREATE INDEX IF NOT EXISTS IX_ImportFiles_Format
-    ON ImportFiles(FormatId);
-CREATE INDEX IF NOT EXISTS IX_ImportFiles_DownloadDate
-    ON ImportFiles(DownloadDateId);
+) WITHOUT ROWID, STRICT;
 
 CREATE INDEX IF NOT EXISTS IX_Transactions_Dedup
-    ON Transactions(AccountId, PostingDateId, AmountId, TypeId);
-CREATE INDEX IF NOT EXISTS IX_Transactions_PostingDate
-    ON Transactions(PostingDateId);
-CREATE INDEX IF NOT EXISTS IX_Transactions_Amount
-    ON Transactions(AmountId);
-CREATE INDEX IF NOT EXISTS IX_Transactions_Type
-    ON Transactions(TypeId);
-
-CREATE INDEX IF NOT EXISTS IX_DepositTransactions_Details
-    ON DepositTransactions(DetailsId);
-CREATE INDEX IF NOT EXISTS IX_DepositTransactions_Balance
-    ON DepositTransactions(BalanceAmountId);
-
-CREATE INDEX IF NOT EXISTS IX_CreditCardTransactions_TransactionDate
-    ON CreditCardTransactions(TransactionDateId);
-CREATE INDEX IF NOT EXISTS IX_CreditCardTransactions_Merchant
-    ON CreditCardTransactions(MerchantId);
-CREATE INDEX IF NOT EXISTS IX_CreditCardTransactions_Category
-    ON CreditCardTransactions(CategoryId);
-
-CREATE INDEX IF NOT EXISTS IX_ChaseCardPayments_TargetAccount
-    ON ChaseCardPayments(TargetAccountId);
-CREATE INDEX IF NOT EXISTS IX_AchTransactions_EffectiveEntryDate
-    ON AchTransactions(EffectiveEntryDateId);
+    ON Transactions(AccountId, PostingDateId, AmountCents, TypeId);
 
 CREATE INDEX IF NOT EXISTS IX_ImportRows_Transaction
     ON ImportRows(TransactionId);
-CREATE INDEX IF NOT EXISTS IX_AchTransactions_Originator
-    ON AchTransactions(OriginatorId);
-CREATE INDEX IF NOT EXISTS IX_AchTransactions_EntryDescription
-    ON AchTransactions(EntryDescriptionId);
-CREATE INDEX IF NOT EXISTS IX_AchTransactions_SecCode
-    ON AchTransactions(SecCodeId);
-CREATE INDEX IF NOT EXISTS IX_AchTransactions_Trace
-    ON AchTransactions(TraceNumberId);
-CREATE INDEX IF NOT EXISTS IX_AchTransactions_IndividualIdentifier
-    ON AchTransactions(IndividualIdentifierId);
-CREATE INDEX IF NOT EXISTS IX_AchTransactions_IndividualName
-    ON AchTransactions(IndividualNameId);
-CREATE INDEX IF NOT EXISTS IX_AchTransactions_PaymentInformation
-    ON AchTransactions(PaymentRelatedInformationId);
-CREATE INDEX IF NOT EXISTS IX_AchTransactions_BankReferenceKind
-    ON AchTransactions(BankReferenceKindId);
-CREATE INDEX IF NOT EXISTS IX_AchTransactions_BankReference
-    ON AchTransactions(BankReferenceId);
-CREATE INDEX IF NOT EXISTS IX_AccountTransfers_Direction
-    ON AccountTransfers(DirectionId);
-CREATE INDEX IF NOT EXISTS IX_AccountTransfers_Counterparty
-    ON AccountTransfers(CounterpartyId);
 
 -- The accounting layer is deliberately separate from the immutable Chase
 -- import layer above.  It is the canonical, editable representation of the
@@ -529,11 +506,11 @@ INSERT INTO AccountingCategories
 VALUES
     ('Counselling Fee', 10, 1, 'CREDIT', 'Revenue'),
     ('Other Revenue', 20, 1, 'CREDIT', 'Revenue'),
+    ('Refunds / Reimbursements', 25, 1, 'CREDIT', 'Revenue'),
     ('Transfers In', 30, 1, 'CREDIT', 'Transfer'),
     ('Transfers Out', 40, 1, 'DEBIT', 'Transfer'),
-    ('Transfers in', 41, 0, 'CREDIT', 'Transfer'),
+    ('Credit Card Payment', 45, 1, 'NEUTRAL', 'Transfer'),
     ('Owners Draw', 50, 1, 'DEBIT', 'Equity'),
-    ('Owner Draw', 51, 0, 'DEBIT', 'Equity'),
     ('Payroll Taxes', 60, 1, 'DEBIT', 'Expense'),
     ('Rebates', 70, 1, 'DEBIT', 'Expense'),
     ('Rent', 80, 1, 'DEBIT', 'Expense'),
@@ -543,19 +520,12 @@ VALUES
     ('Insurance - Work Comp', 120, 1, 'DEBIT', 'Expense'),
     ('Interest Expense', 130, 1, 'DEBIT', 'Expense'),
     ('Legal Expense', 140, 1, 'DEBIT', 'Expense'),
-    ('Licenses & Dues', 150, 1, 'DEBIT', 'Expense'),
-    ('License Fees', 151, 1, 'DEBIT', 'Expense'),
     ('Office Expense', 160, 1, 'DEBIT', 'Expense'),
     ('Telephone', 170, 1, 'DEBIT', 'Expense'),
     ('Misc. Expense', 180, 1, 'DEBIT', 'Expense'),
-    ('Credit Card Payment, Transfers out and non-deductible exp', 190, 1, 'DEBIT', 'Transfer'),
     ('Accounting Fee', 200, 1, 'DEBIT', 'Expense'),
-    ('Advertising Expense', 210, 1, 'DEBIT', 'Expense'),
-    ('Credit Card Pmt', 220, 1, 'CREDIT', 'Transfer'),
-    ('Refunds / Reimbursements', 230, 1, 'CREDIT', 'Revenue'),
-    ('Refunds / Reimburse-ments', 231, 1, 'CREDIT', 'Revenue'),
+    ('Advertising', 210, 1, 'DEBIT', 'Expense'),
     ('Software Expense', 240, 1, 'DEBIT', 'Expense'),
-    ('Advertising', 250, 1, 'DEBIT', 'Expense'),
     ('Continuing Ed', 260, 1, 'DEBIT', 'Expense'),
     ('LLC Fee', 270, 1, 'DEBIT', 'Expense'),
     ('Professional Association Fee', 280, 1, 'DEBIT', 'Expense'),
@@ -589,6 +559,12 @@ CREATE TABLE IF NOT EXISTS AccountingCheckNumbers
     Number TEXT NOT NULL UNIQUE
 ) STRICT;
 
+CREATE TABLE IF NOT EXISTS TimestampValues
+(
+    Id          INTEGER PRIMARY KEY,
+    UnixSeconds INTEGER NOT NULL UNIQUE
+) STRICT;
+
 CREATE TABLE IF NOT EXISTS AccountingEntries
 (
     Id                INTEGER PRIMARY KEY,
@@ -604,8 +580,8 @@ CREATE TABLE IF NOT EXISTS AccountingEntries
     IsManual          INTEGER NOT NULL DEFAULT 0 CHECK (IsManual IN (0, 1)),
     NeedsReview       INTEGER NOT NULL DEFAULT 0 CHECK (NeedsReview IN (0, 1)),
     IsSuppressed      INTEGER NOT NULL DEFAULT 0 CHECK (IsSuppressed IN (0, 1)),
-    CreatedAtUtc      TEXT NOT NULL,
-    ModifiedAtUtc     TEXT NOT NULL,
+    CreatedTimestampId  INTEGER NOT NULL,
+    ModifiedTimestampId INTEGER NOT NULL,
 
     FOREIGN KEY (AccountId) REFERENCES Accounts(Id),
     FOREIGN KEY (EntryDateId) REFERENCES AccountingDateValues(Id),
@@ -613,7 +589,9 @@ CREATE TABLE IF NOT EXISTS AccountingEntries
     FOREIGN KEY (DescriptionTextId) REFERENCES AccountingTextValues(Id),
     FOREIGN KEY (ExplanationTextId) REFERENCES AccountingTextValues(Id),
     FOREIGN KEY (CategoryId) REFERENCES AccountingCategories(Id),
-    FOREIGN KEY (CheckNumberId) REFERENCES AccountingCheckNumbers(Id)
+    FOREIGN KEY (CheckNumberId) REFERENCES AccountingCheckNumbers(Id),
+    FOREIGN KEY (CreatedTimestampId) REFERENCES TimestampValues(Id),
+    FOREIGN KEY (ModifiedTimestampId) REFERENCES TimestampValues(Id)
 ) STRICT;
 
 CREATE TABLE IF NOT EXISTS AccountingEntryTransactions
@@ -626,17 +604,14 @@ CREATE TABLE IF NOT EXISTS AccountingEntryTransactions
         ON DELETE CASCADE,
     FOREIGN KEY (TransactionId)
         REFERENCES Transactions(Id)
-) STRICT;
+) WITHOUT ROWID, STRICT;
 
 CREATE INDEX IF NOT EXISTS IX_AccountingEntries_AccountDateOrder
     ON AccountingEntries(AccountId, EntryDateId, DisplayOrder);
-CREATE INDEX IF NOT EXISTS IX_AccountingEntries_Category
-    ON AccountingEntries(CategoryId);
 CREATE UNIQUE INDEX IF NOT EXISTS UX_AccountingEntries_OpeningBalance
     ON AccountingEntries(AccountId, EntryDateId)
     WHERE IsOpeningBalance = 1;
 CREATE INDEX IF NOT EXISTS IX_AccountingEntryTransactions_Transaction
     ON AccountingEntryTransactions(TransactionId);
 
-PRAGMA user_version = 6;
 PRAGMA optimize;

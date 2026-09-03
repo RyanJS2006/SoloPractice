@@ -317,7 +317,7 @@ internal static class AccountingLedgerService
                 CASE WHEN account.Last4 = '8027'
                      THEN transactionDate.UnixSeconds
                      ELSE postingDate.UnixSeconds END,
-                amount.Cents,
+                t.AmountCents,
                 type.Code,
                 deposit.CheckOrSlipNumber,
                 originator.CompanyName,
@@ -341,7 +341,6 @@ internal static class AccountingLedgerService
             FROM Transactions t
             JOIN Accounts account ON account.Id = t.AccountId
             JOIN DateValues postingDate ON postingDate.Id = t.PostingDateId
-            JOIN MoneyValues amount ON amount.Id = t.AmountId
             JOIN TransactionTypes type ON type.Id = t.TypeId
             LEFT JOIN DepositTransactions deposit ON deposit.TransactionId = t.Id
             LEFT JOIN AchTransactions ach ON ach.TransactionId = t.Id
@@ -451,7 +450,10 @@ internal static class AccountingLedgerService
                 : ReadImportedOpeningBalance(connection, transaction, last4, year);
             long amountId = AccountingLookup.GetOrCreateMoney(connection, transaction, openingCents);
             long descriptionId = AccountingLookup.GetOrCreateText(connection, transaction, "DESCRIPTION", "Balance forward");
-            string now = DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture);
+            long timestampId = AccountingLookup.GetOrCreateTimestamp(
+                connection,
+                transaction,
+                DateTimeOffset.UtcNow.ToUnixTimeSeconds());
             using SqliteCommand insert = connection.CreateCommand();
             insert.Transaction = transaction;
             insert.CommandText = """
@@ -460,21 +462,21 @@ internal static class AccountingLedgerService
                     AccountId, EntryDateId, AmountId, DescriptionTextId,
                     ExplanationTextId, CategoryId, CheckNumberId, DisplayOrder,
                     IsOpeningBalance, IsManual, NeedsReview, IsSuppressed,
-                    CreatedAtUtc, ModifiedAtUtc
+                    CreatedTimestampId, ModifiedTimestampId
                 )
                 VALUES
                 (
                     $account, $date, $amount, $description,
                     NULL, NULL, NULL, 0,
                     1, 0, 0, 0,
-                    $now, $now
+                    $timestamp, $timestamp
                 );
                 """;
             insert.Parameters.AddWithValue("$account", accountId);
             insert.Parameters.AddWithValue("$date", dateId);
             insert.Parameters.AddWithValue("$amount", amountId);
             insert.Parameters.AddWithValue("$description", descriptionId);
-            insert.Parameters.AddWithValue("$now", now);
+            insert.Parameters.AddWithValue("$timestamp", timestampId);
             insert.ExecuteNonQuery();
             created++;
         }
@@ -507,13 +509,11 @@ internal static class AccountingLedgerService
                 FROM ImportRows
                 WHERE ImportFileId = (SELECT Id FROM LatestImport)
             )
-            SELECT balance.Cents - amount.Cents
+            SELECT deposit.BalanceCents - t.AmountCents
             FROM Transactions t
             JOIN Accounts account ON account.Id = t.AccountId
             JOIN DateValues postingDate ON postingDate.Id = t.PostingDateId
-            JOIN MoneyValues amount ON amount.Id = t.AmountId
             JOIN DepositTransactions deposit ON deposit.TransactionId = t.Id
-            JOIN MoneyValues balance ON balance.Id = deposit.BalanceAmountId
             LEFT JOIN LatestRows latest ON latest.TransactionId = t.Id
             WHERE account.Last4 = $last4
               AND postingDate.UnixSeconds >= $start
@@ -547,7 +547,10 @@ internal static class AccountingLedgerService
         long? checkId = string.IsNullOrWhiteSpace(pending.CheckNumber)
             ? null
             : AccountingLookup.GetOrCreateCheckNumber(connection, transaction, pending.CheckNumber);
-        string now = DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture);
+        long timestampId = AccountingLookup.GetOrCreateTimestamp(
+            connection,
+            transaction,
+            DateTimeOffset.UtcNow.ToUnixTimeSeconds());
 
         using SqliteCommand command = connection.CreateCommand();
         command.Transaction = transaction;
@@ -556,13 +559,14 @@ internal static class AccountingLedgerService
             (
                 AccountId, EntryDateId, AmountId, DescriptionTextId,
                 ExplanationTextId, CategoryId, CheckNumberId, DisplayOrder,
-                IsOpeningBalance, IsManual, NeedsReview, IsSuppressed, CreatedAtUtc, ModifiedAtUtc
+                IsOpeningBalance, IsManual, NeedsReview, IsSuppressed,
+                CreatedTimestampId, ModifiedTimestampId
             )
             VALUES
             (
                 $account, $date, $amount, $description,
                 $explanation, $category, $check, $order,
-                0, 0, $review, 0, $now, $now
+                0, 0, $review, 0, $timestamp, $timestamp
             );
             SELECT last_insert_rowid();
             """;
@@ -575,7 +579,7 @@ internal static class AccountingLedgerService
         command.Parameters.AddWithValue("$check", (object?)checkId ?? DBNull.Value);
         command.Parameters.AddWithValue("$order", displayOrder);
         command.Parameters.AddWithValue("$review", pending.ReviewReason is null ? 0 : 1);
-        command.Parameters.AddWithValue("$now", now);
+        command.Parameters.AddWithValue("$timestamp", timestampId);
         return Convert.ToInt64(command.ExecuteScalar(), CultureInfo.InvariantCulture);
     }
 
@@ -667,6 +671,12 @@ internal static class AccountingLookup
         long cents) =>
         GetOrCreateInt64(connection, transaction, "AccountingMoneyValues", "Cents", cents);
 
+    public static long GetOrCreateTimestamp(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        long unixSeconds) =>
+        GetOrCreateInt64(connection, transaction, "TimestampValues", "UnixSeconds", unixSeconds);
+
     public static long GetOrCreateText(
         SqliteConnection connection,
         SqliteTransaction transaction,
@@ -757,11 +767,50 @@ internal static class AccountingLookup
     private static string NormalizeCategoryName(string value)
     {
         string trimmed = value.Trim();
+
         if (trimmed.Equals("Transfers in", StringComparison.OrdinalIgnoreCase))
             return "Transfers In";
+
         if (trimmed.Equals("Owner Draw", StringComparison.OrdinalIgnoreCase) ||
             trimmed.Equals("Owners Draw", StringComparison.OrdinalIgnoreCase))
+        {
             return "Owners Draw";
+        }
+
+        if (trimmed.Equals("Credit Card Pmt", StringComparison.OrdinalIgnoreCase) ||
+            trimmed.Equals(
+                "Credit Card Payment, Transfers out and non-deductible exp",
+                StringComparison.OrdinalIgnoreCase) ||
+            trimmed.Equals("Credit Card Payment", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Credit Card Payment";
+        }
+
+        if (trimmed.Equals("Advertising Expense", StringComparison.OrdinalIgnoreCase) ||
+            trimmed.Equals("Advertising", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Advertising";
+        }
+
+        if (trimmed.Equals("Refunds / Reimburse-ments", StringComparison.OrdinalIgnoreCase) ||
+            trimmed.Equals("Refunds / Reimbursements", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Refunds / Reimbursements";
+        }
+
+        if (trimmed.Equals("License Fees", StringComparison.OrdinalIgnoreCase) ||
+            trimmed.Equals("Professional License Fee", StringComparison.OrdinalIgnoreCase) ||
+            trimmed.Equals("Professional Licenses Fee", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Professional Licenses Fee";
+        }
+
+        if (trimmed.Equals("Licenses & Dues", StringComparison.OrdinalIgnoreCase))
+            return "Professional Association Fee";
+
+        if (trimmed.Equals("Wifi Fee", StringComparison.OrdinalIgnoreCase))
+            return "WiFi Fee";
+
         return trimmed;
     }
 }

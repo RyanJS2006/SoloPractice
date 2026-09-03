@@ -401,3 +401,4 @@ Desktop.ini
 
 # VS Code workspace settings
 .vscode/
+.artifacts/
