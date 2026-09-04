@@ -76,6 +76,9 @@ internal static class AppPaths
     public static string GetTaxFormsDirectory(int year) =>
         Path.Combine(GetAccountingDirectory(year), $"{year}_Tax_Forms");
 
+    public static string GetInsuranceStatementsDirectory(int year) =>
+        Path.Combine(GetAccountingDirectory(year), $"{year}_Insurance_Statements");
+
     public static void EnsureApplicationDirectoriesExist()
     {
         Directory.CreateDirectory(ApplicationDirectory);
@@ -92,6 +95,7 @@ internal static class AppPaths
             Directory.CreateDirectory(GetMonthlyReceiptsDirectory(year, month));
         Directory.CreateDirectory(GetAdditionalReceiptsDirectory(year));
         Directory.CreateDirectory(GetTaxFormsDirectory(year));
+        Directory.CreateDirectory(GetInsuranceStatementsDirectory(year));
 
         string legacyWorkbook = Path.Combine(
             ApplicationDirectory,

@@ -1,4 +1,5 @@
 using Microsoft.Data.Sqlite;
+using SoloPractice.Services;
 using SoloPractice.Utilities;
 
 namespace SoloPractice.Data;
@@ -31,7 +32,18 @@ internal static class Database
     {
         AppPaths.EnsureApplicationDirectoriesExist();
 
+        bool existingDatabase =
+            File.Exists(AppPaths.DatabasePath) &&
+            new FileInfo(AppPaths.DatabasePath).Length > 0;
+
         using var connection = OpenConnection();
+
+        if (existingDatabase &&
+            TableExists(connection, "TimestampValues") &&
+            !TableExists(connection, "ArchivedDocuments"))
+        {
+            DatabaseBackupService.CreateVerifiedBackup(connection);
+        }
 
         ExecuteNonQuery(connection, LoadSchemaSql());
         ValidateForeignKeys(connection);
@@ -80,5 +92,23 @@ internal static class Database
         using var command = connection.CreateCommand();
         command.CommandText = sql;
         command.ExecuteNonQuery();
+    }
+
+    private static bool TableExists(
+        SqliteConnection connection,
+        string tableName)
+    {
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT EXISTS
+            (
+                SELECT 1
+                FROM sqlite_schema
+                WHERE type = 'table'
+                  AND name = $name
+            );
+            """;
+        command.Parameters.AddWithValue("$name", tableName);
+        return Convert.ToInt64(command.ExecuteScalar()) != 0;
     }
 }

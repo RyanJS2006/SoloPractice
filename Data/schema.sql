@@ -564,6 +564,42 @@ CREATE TABLE IF NOT EXISTS TimestampValues
     UnixSeconds INTEGER NOT NULL UNIQUE
 ) STRICT;
 
+CREATE TABLE IF NOT EXISTS DocumentTypes
+(
+    Id   INTEGER PRIMARY KEY,
+    Code TEXT NOT NULL UNIQUE
+) STRICT;
+
+INSERT INTO DocumentTypes (Id, Code)
+VALUES
+    (1, 'RECEIPT'),
+    (2, 'ADDITIONAL_RECEIPT'),
+    (3, 'TAX_FORM'),
+    (4, 'INSURANCE_STATEMENT')
+ON CONFLICT DO NOTHING;
+
+CREATE TABLE IF NOT EXISTS ArchivedDocuments
+(
+    Id                    INTEGER PRIMARY KEY,
+    Sha256                BLOB NOT NULL UNIQUE CHECK (length(Sha256) = 32),
+    DocumentTypeId        INTEGER NOT NULL,
+    Year                  INTEGER NOT NULL CHECK (Year BETWEEN 2000 AND 9998),
+    Month                 INTEGER CHECK (Month BETWEEN 1 AND 12),
+    OriginalFileName      TEXT NOT NULL,
+    ArchivedFileName      TEXT NOT NULL,
+    ArchivedRelativePath  TEXT NOT NULL UNIQUE,
+    DisplayName           TEXT NOT NULL,
+    ArchivedTimestampId   INTEGER NOT NULL,
+
+    FOREIGN KEY (DocumentTypeId) REFERENCES DocumentTypes(Id),
+    FOREIGN KEY (ArchivedTimestampId) REFERENCES TimestampValues(Id),
+
+    CHECK (
+        (DocumentTypeId = 1 AND Month IS NOT NULL)
+        OR (DocumentTypeId <> 1 AND Month IS NULL)
+    )
+) STRICT;
+
 CREATE TABLE IF NOT EXISTS AccountingEntries
 (
     Id                INTEGER PRIMARY KEY,

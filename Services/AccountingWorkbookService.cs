@@ -52,6 +52,18 @@ internal static class AccountingWorkbookService
     public static string GetWorkbookPath(int year) =>
         AppPaths.GetWorkbookPath(year);
 
+    public static AccountingWorkbookResult ReadCurrentState(
+        int year,
+        string? workbookPath = null)
+    {
+        workbookPath ??= GetWorkbookPath(year);
+        IReadOnlyList<AccountingEntry> entries = AccountingLedgerService.ReadEntries(year);
+        return CreateResult(
+            workbookPath,
+            entries,
+            replacedExistingWorkbook: File.Exists(workbookPath));
+    }
+
     public static AccountingWorkbookResult Generate(
         int year,
         string? workbookPath = null,
@@ -99,14 +111,20 @@ internal static class AccountingWorkbookService
         if (openAfterSaving)
             OpenWorkbook(workbookPath);
 
-        return new AccountingWorkbookResult(
+        return CreateResult(workbookPath, entries, replaced);
+    }
+
+    private static AccountingWorkbookResult CreateResult(
+        string workbookPath,
+        IReadOnlyList<AccountingEntry> entries,
+        bool replacedExistingWorkbook) =>
+        new(
             workbookPath,
             entries.Count(entry => entry.AccountLast4 == AccountingClassifier.CheckingAccount && !entry.IsOpeningBalance),
             entries.Count(entry => entry.AccountLast4 == AccountingClassifier.SavingsAccount && !entry.IsOpeningBalance),
             entries.Count(entry => entry.AccountLast4 == AccountingClassifier.CreditCardAccount && !entry.IsOpeningBalance),
             entries.Count(entry => entry.NeedsReview),
-            replaced);
-    }
+            replacedExistingWorkbook);
 
     public static AccountingWorkbookSyncResult ImportWorkbookEdits(
         int year,

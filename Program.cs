@@ -1,7 +1,9 @@
 ﻿using SoloPractice.Data;
 using SoloPractice.Services;
 using SoloPractice.Utilities;
+using System.Globalization;
 using System.Text;
+using System.Text.RegularExpressions;
 
 namespace SoloPractice;
 
@@ -15,13 +17,14 @@ internal static class Program
     [
         (MainMenuAction.ImportChase, "Import Chase Bank Statement CSV"),
         (MainMenuAction.AccountingWorksheet, "Generate/Update/Open Accounting Spreadsheet"),
-        (MainMenuAction.ReceiptScans, "Upload Receipt Scans"),
-        (MainMenuAction.InsuranceAndTaxForms, "Upload Insurance Company Statements and Tax Forms"),
+        (MainMenuAction.DocumentArchive, "Upload / Archive Documents"),
         (MainMenuAction.About, "About")
     ];
 
     private static void Main(string[] args)
     {
+        Console.OutputEncoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
+
         try
         {
             Database.Initialize();
@@ -128,12 +131,8 @@ internal static class Program
                     RunAccountingWorksheetMenu();
                     break;
 
-                case MainMenuAction.ReceiptScans:
-                    NotImplemented("Receipt scans");
-                    break;
-
-                case MainMenuAction.InsuranceAndTaxForms:
-                    NotImplemented("Insurance and tax forms");
+                case MainMenuAction.DocumentArchive:
+                    RunDocumentArchive();
                     break;
 
                 case MainMenuAction.About:
@@ -341,7 +340,7 @@ internal static class Program
         DrawKeyHint("↑/↓/←/→");
         Console.ForegroundColor = ConsoleColor.DarkGray;
         Console.Write(" or ");
-        DrawKeyHint("1-5");
+        DrawKeyHint($"1-{MainMenuOptions.Length}");
         Console.ForegroundColor = ConsoleColor.DarkGray;
         Console.Write(" to Navigate, ");
         DrawKeyHint("Enter");
@@ -517,30 +516,26 @@ internal static class Program
     private static void ImportChaseDownload(
         string? initialCsvPath = null)
     {
-        var history = new List<ImportPageEntry>();
         var buffer = new StringBuilder();
+
+        DrawImportPage();
 
         if (!string.IsNullOrWhiteSpace(initialCsvPath))
         {
-            history.Add(
-                ImportOneChaseFile(
-                    NormalizePathInput(initialCsvPath)));
+            string path = NormalizePathInput(initialCsvPath);
+            Console.ForegroundColor = ConsoleColor.White;
+            Console.Write("> ");
+            Console.WriteLine(path);
+            Console.WriteLine();
+            DrawImportPageEntry(ImportOneChaseFile(path));
+            Console.WriteLine();
         }
 
-        ImportPageLayout layout =
-            DrawImportPage(history, buffer.ToString());
-
-        int drawnWidth = layout.WindowWidth;
-        int drawnHeight = layout.WindowHeight;
-        int latestWidth = drawnWidth;
-        int latestHeight = drawnHeight;
-        DateTime lastResizeTime = DateTime.MinValue;
+        DrawChaseImportPrompt();
         DateTime lastTextInputTime = DateTime.MinValue;
 
         while (true)
         {
-            bool redrawn = false;
-
             while (Console.KeyAvailable)
             {
                 ConsoleKeyInfo key =
@@ -548,6 +543,7 @@ internal static class Program
 
                 if (key.Key == ConsoleKey.Escape)
                 {
+                    Console.WriteLine();
                     Console.CursorVisible = false;
                     Console.ResetColor();
                     return;
@@ -558,21 +554,15 @@ internal static class Program
                     if (buffer.Length == 0)
                         continue;
 
-                    history.Add(
-                        ImportOneChaseFile(
-                            NormalizePathInput(buffer.ToString())));
+                    string path = NormalizePathInput(buffer.ToString());
+                    Console.WriteLine();
+                    Console.WriteLine();
+                    DrawImportPageEntry(ImportOneChaseFile(path));
                     buffer.Clear();
-
-                    layout = DrawImportPage(
-                        history,
-                        buffer.ToString());
-                    drawnWidth = layout.WindowWidth;
-                    drawnHeight = layout.WindowHeight;
-                    latestWidth = drawnWidth;
-                    latestHeight = drawnHeight;
+                    Console.WriteLine();
+                    DrawChaseImportPrompt();
                     lastTextInputTime = DateTime.MinValue;
-                    redrawn = true;
-                    break;
+                    continue;
                 }
 
                 if (key.Key == ConsoleKey.Backspace)
@@ -581,15 +571,7 @@ internal static class Program
                     {
                         buffer.Length--;
                         lastTextInputTime = DateTime.UtcNow;
-                        layout = DrawImportPage(
-                            history,
-                            buffer.ToString());
-                        drawnWidth = layout.WindowWidth;
-                        drawnHeight = layout.WindowHeight;
-                        latestWidth = drawnWidth;
-                        latestHeight = drawnHeight;
-                        redrawn = true;
-                        break;
+                        Console.Write("\b \b");
                     }
                     continue;
                 }
@@ -602,9 +584,6 @@ internal static class Program
                 }
             }
 
-            if (redrawn)
-                continue;
-
             // Same idle-submit behavior as the main menu: a dropped CSV is
             // imported as soon as the full path has arrived.
             if (buffer.Length > 0 &&
@@ -614,58 +593,21 @@ internal static class Program
                     buffer.ToString(),
                     out string? droppedCsvPath))
             {
-                history.Add(
-                    ImportOneChaseFile(droppedCsvPath!));
+                Console.WriteLine();
+                Console.WriteLine();
+                DrawImportPageEntry(ImportOneChaseFile(droppedCsvPath!));
                 buffer.Clear();
-
-                layout = DrawImportPage(
-                    history,
-                    buffer.ToString());
-                drawnWidth = layout.WindowWidth;
-                drawnHeight = layout.WindowHeight;
-                latestWidth = drawnWidth;
-                latestHeight = drawnHeight;
+                Console.WriteLine();
+                DrawChaseImportPrompt();
                 lastTextInputTime = DateTime.MinValue;
                 continue;
-            }
-
-            int currentWidth = Console.WindowWidth;
-            int currentHeight = Console.WindowHeight;
-
-            if (currentWidth != latestWidth ||
-                currentHeight != latestHeight)
-            {
-                latestWidth = currentWidth;
-                latestHeight = currentHeight;
-                lastResizeTime = DateTime.UtcNow;
-            }
-
-            bool sizeChanged =
-                latestWidth != drawnWidth ||
-                latestHeight != drawnHeight;
-
-            bool resizeSettled =
-                (DateTime.UtcNow - lastResizeTime)
-                    .TotalMilliseconds >= ResizeDebounceMilliseconds;
-
-            if (sizeChanged && resizeSettled)
-            {
-                layout = DrawImportPage(
-                    history,
-                    buffer.ToString());
-                drawnWidth = layout.WindowWidth;
-                drawnHeight = layout.WindowHeight;
-                latestWidth = drawnWidth;
-                latestHeight = drawnHeight;
             }
 
             Thread.Sleep(10);
         }
     }
 
-    private static ImportPageLayout DrawImportPage(
-        IReadOnlyList<ImportPageEntry> history,
-        string inputBuffer)
+    private static void DrawImportPage()
     {
         ClearForRedraw();
         Console.CursorVisible = false;
@@ -681,74 +623,24 @@ internal static class Program
         Console.ForegroundColor = ConsoleColor.Green;
         Console.WriteLine("Import Chase Download");
         Console.WriteLine();
+    }
 
-        if (history.Count > 0)
-        {
-            // Keep the controls and prompt close to the cursor. Show as many of
-            // the newest import results as fit above them, rather than allowing
-            // old results to push the controls off-screen.
-            int availableHistoryRows = Math.Max(
-                0,
-                Console.WindowHeight - Console.CursorTop - 7);
-
-            var visible = new List<ImportPageEntry>();
-            int usedRows = 0;
-
-            for (int i = history.Count - 1; i >= 0; i--)
-            {
-                int entryRows = GetImportPageEntryLineCount(history[i]) + 1;
-                if (usedRows + entryRows > availableHistoryRows)
-                    break;
-
-                visible.Add(history[i]);
-                usedRows += entryRows;
-            }
-
-            visible.Reverse();
-            int hiddenCount = history.Count - visible.Count;
-
-            if (hiddenCount > 0 && availableHistoryRows > usedRows)
-            {
-                Console.ForegroundColor = ConsoleColor.DarkGray;
-                Console.WriteLine(
-                    $"… {hiddenCount:N0} earlier import result(s) hidden …");
-                usedRows++;
-            }
-
-            foreach (ImportPageEntry entry in visible)
-            {
-                DrawImportPageEntry(entry);
-                Console.WriteLine();
-            }
-        }
-
+    private static void DrawChaseImportPrompt()
+    {
         Console.ForegroundColor = ConsoleColor.Gray;
-        Console.WriteLine(
-            "Drag a Chase .csv here, or type/paste its path.");
-
-        Console.ForegroundColor = ConsoleColor.DarkGray;
-        Console.Write("Press ");
+        if (Console.WindowWidth >= 72)
+            Console.Write("Drag a Chase .csv here, or type/paste its path.  ");
         WriteKeyBadge("[Enter]");
-        Console.ForegroundColor = ConsoleColor.DarkGray;
-        Console.WriteLine(" to import the typed/pasted path.");
-
-        Console.Write("Press ");
+        Console.ForegroundColor = ConsoleColor.Gray;
+        Console.Write(" Import    ");
         WriteKeyBadge("[Esc]");
-        Console.ForegroundColor = ConsoleColor.DarkGray;
-        Console.WriteLine(" to go back.");
+        Console.ForegroundColor = ConsoleColor.Gray;
+        Console.WriteLine(" Back");
 
-        Console.WriteLine();
         Console.ForegroundColor = ConsoleColor.White;
-        int promptTop = Console.CursorTop;
         Console.Write("> ");
-        Console.Write(inputBuffer);
         Console.ResetColor();
         Console.CursorVisible = true;
-
-        return new ImportPageLayout(
-            promptTop,
-            Console.WindowWidth,
-            Console.WindowHeight);
     }
 
     private static ImportPageEntry ImportOneChaseFile(
@@ -764,14 +656,12 @@ internal static class Program
             if (result.FileAlreadyImported)
             {
                 return new ImportPageEntry(
-                    path,
                     "This exact Chase download has already been imported.",
                     ConsoleColor.Yellow,
                     [result.FileName]);
             }
 
             return new ImportPageEntry(
-                path,
                 "Import successful.",
                 ConsoleColor.Green,
                 [
@@ -797,28 +687,15 @@ internal static class Program
 #endif
 
             return new ImportPageEntry(
-                path,
                 "Import failed.",
                 ConsoleColor.Red,
                 detailLines);
         }
     }
 
-    private static int GetImportPageEntryLineCount(
-        ImportPageEntry entry) =>
-        3 +
-        (entry.DetailLines.Count > 0
-            ? 1 + entry.DetailLines.Count
-            : 0);
-
     private static void DrawImportPageEntry(
         ImportPageEntry entry)
     {
-        Console.ForegroundColor = ConsoleColor.White;
-        Console.Write("> ");
-        Console.WriteLine(entry.Path);
-        Console.WriteLine();
-
         Console.ForegroundColor = entry.StatusColor;
         Console.WriteLine(entry.Status);
 
@@ -921,13 +798,7 @@ internal static class Program
         AccountingYearOption option =
             options[selectedIndex.Value];
 
-        if (option.Action == AccountingWorkbookAction.Open)
-        {
-            AccountingWorkbookService.OpenWorkbook(option.WorkbookPath);
-            return;
-        }
-
-        GenerateAccountingWorksheet(option.Year);
+        RunAccountingWorkbookSession(option);
     }
 
     private static AccountingYearOption[] GetAccountingYearOptions()
@@ -1145,59 +1016,55 @@ internal static class Program
             Console.WindowHeight);
     }
 
-    private static void GenerateAccountingWorksheet(
-        int year)
+    private static void RunAccountingWorkbookSession(
+        AccountingYearOption option)
     {
-        DrawAccountingProcessingPage(year);
+        int year = option.Year;
+        DrawAccountingProcessingPage(year, option.Action);
 
         try
         {
             AppPaths.EnsureAccountingYearDirectoriesExist(year);
-            string workbookPath =
-                AccountingWorkbookService.GetWorkbookPath(year);
+            string workbookPath = option.WorkbookPath;
 
             DatabaseBackupResult? backup =
                 DatabaseBackupService.CreateVerifiedBackup();
 
             AccountingWorkbookSyncResult? preSync = null;
-            bool legacyWorkbook = false;
+            AccountingGenerationResult generated = new(0, 0, 0);
+            AccountingWorkbookResult result;
 
-            if (File.Exists(workbookPath))
+            if (option.Action == AccountingWorkbookAction.Open)
             {
-                legacyWorkbook =
-                    !AccountingWorkbookService.IsDatabaseBackedWorkbook(
-                        year,
-                        workbookPath);
+                if (!File.Exists(workbookPath))
+                    throw new FileNotFoundException("The accounting workbook no longer exists.", workbookPath);
 
-                if (!legacyWorkbook)
+                result = AccountingWorkbookService.ReadCurrentState(year, workbookPath);
+            }
+            else
+            {
+                if (option.Action == AccountingWorkbookAction.Update && File.Exists(workbookPath))
                 {
-                    preSync =
-                        AccountingWorkbookService.ImportWorkbookEdits(
+                    bool legacyWorkbook =
+                        !AccountingWorkbookService.IsDatabaseBackedWorkbook(
                             year,
                             workbookPath);
+                    preSync = legacyWorkbook
+                        ? AccountingWorkbookService.ImportLegacyWorkbookEdits(year, workbookPath)
+                        : AccountingWorkbookService.ImportWorkbookEdits(year, workbookPath);
                 }
+
+                generated = AccountingLedgerService.GenerateMissingEntries(year);
+                result = AccountingWorkbookService.Generate(year, workbookPath);
             }
-
-            AccountingGenerationResult generated =
-                AccountingLedgerService.GenerateMissingEntries(year);
-
-            if (legacyWorkbook)
-            {
-                preSync =
-                    AccountingWorkbookService.ImportLegacyWorkbookEdits(
-                        year,
-                        workbookPath);
-            }
-
-            AccountingWorkbookResult result =
-                AccountingWorkbookService.Generate(year);
 
             AccountingWorkbookService.OpenWorkbook(
-                result.WorkbookPath);
+                workbookPath);
 
             ConsoleKey next = WaitForEnterOrEscapeWithResize(
                 () => DrawAccountingWorkbookReadyPage(
                     year,
+                    option.Action,
                     result,
                     generated,
                     preSync,
@@ -1232,7 +1099,8 @@ internal static class Program
     }
 
     private static void DrawAccountingProcessingPage(
-        int year)
+        int year,
+        AccountingWorkbookAction action)
     {
         ClearForRedraw();
         Console.CursorVisible = false;
@@ -1242,18 +1110,25 @@ internal static class Program
         Console.WriteLine();
 
         Console.ForegroundColor = ConsoleColor.Green;
-        Console.WriteLine(
-            $"Generate / Update {year} Accounting Spreadsheet");
+        Console.WriteLine(action switch
+        {
+            AccountingWorkbookAction.Generate => $"Generate {year} Accounting Spreadsheet",
+            AccountingWorkbookAction.Update => $"Update {year} Accounting Spreadsheet",
+            AccountingWorkbookAction.Open => $"Open {year} Accounting Spreadsheet",
+            _ => throw new InvalidOperationException()
+        });
         Console.WriteLine();
 
         Console.ForegroundColor = ConsoleColor.Gray;
-        Console.WriteLine(
-            $"Updating the {year} accounting ledger from SoloPractice.db...");
+        Console.WriteLine(action == AccountingWorkbookAction.Open
+            ? $"Opening the existing {year} accounting workbook..."
+            : $"Updating the {year} accounting ledger from SoloPractice.db...");
         Console.ResetColor();
     }
 
     private static void DrawAccountingWorkbookReadyPage(
         int year,
+        AccountingWorkbookAction action,
         AccountingWorkbookResult result,
         AccountingGenerationResult generated,
         AccountingWorkbookSyncResult? preSync,
@@ -1267,10 +1142,16 @@ internal static class Program
         Console.WriteLine();
 
         Console.ForegroundColor = ConsoleColor.Green;
-        Console.WriteLine(
-            result.ReplacedExistingWorkbook
-                ? $"{year} accounting workbook updated successfully."
-                : $"{year} accounting workbook generated successfully.");
+        Console.WriteLine(action switch
+        {
+            AccountingWorkbookAction.Generate =>
+                $"{year} accounting workbook generated successfully.",
+            AccountingWorkbookAction.Update =>
+                $"{year} accounting workbook updated successfully.",
+            AccountingWorkbookAction.Open =>
+                $"{year} accounting workbook opened successfully.",
+            _ => throw new InvalidOperationException()
+        });
 
         Console.ForegroundColor = ConsoleColor.Gray;
         Console.WriteLine();
@@ -1319,9 +1200,7 @@ internal static class Program
         Console.Write("Press ");
         WriteKeyBadge("[Enter]");
         Console.ForegroundColor = ConsoleColor.Gray;
-        Console.WriteLine(
-            " to sync saved spreadsheet changes back into SoloPractice.");
-        Console.Write("Press ");
+        Console.Write(" to sync saved spreadsheet changes back into SoloPractice.  Press ");
         WriteKeyBadge("[Esc]");
         Console.ForegroundColor = ConsoleColor.Gray;
         Console.WriteLine(
@@ -1488,6 +1367,512 @@ internal static class Program
         Console.BackgroundColor = ConsoleColor.Cyan;
         Console.Write(text);
         Console.BackgroundColor = ConsoleColor.Black;
+    }
+
+    private static void RunDocumentArchive()
+    {
+        DrawDocumentArchivePage();
+        var buffer = new StringBuilder();
+        bool backupCreated = false;
+        DateTime lastTextInputTime = DateTime.MinValue;
+        DrawDocumentArchivePrompt();
+
+        while (true)
+        {
+            while (Console.KeyAvailable)
+            {
+                ConsoleKeyInfo key = Console.ReadKey(intercept: true);
+                if (key.Key == ConsoleKey.Escape)
+                {
+                    Console.WriteLine();
+                    Console.CursorVisible = false;
+                    Console.ResetColor();
+                    return;
+                }
+
+                if (key.Key == ConsoleKey.Enter)
+                {
+                    if (buffer.Length == 0)
+                        continue;
+
+                    Console.WriteLine();
+                    ProcessDocumentInput(buffer.ToString(), ref backupCreated);
+                    buffer.Clear();
+                    Console.WriteLine();
+                    DrawDocumentArchivePrompt();
+                    lastTextInputTime = DateTime.MinValue;
+                    continue;
+                }
+
+                if (key.Key == ConsoleKey.Backspace)
+                {
+                    if (buffer.Length > 0)
+                    {
+                        buffer.Length--;
+                        Console.Write("\b \b");
+                        lastTextInputTime = DateTime.UtcNow;
+                    }
+                    continue;
+                }
+
+                if (!char.IsControl(key.KeyChar))
+                {
+                    buffer.Append(key.KeyChar);
+                    Console.Write(key.KeyChar);
+                    lastTextInputTime = DateTime.UtcNow;
+                }
+            }
+
+            if (buffer.Length > 0 &&
+                (DateTime.UtcNow - lastTextInputTime).TotalMilliseconds >= CsvPasteIdleMilliseconds &&
+                TryParseExistingDocumentPaths(buffer.ToString(), out _))
+            {
+                Console.WriteLine();
+                ProcessDocumentInput(buffer.ToString(), ref backupCreated);
+                buffer.Clear();
+                Console.WriteLine();
+                DrawDocumentArchivePrompt();
+                lastTextInputTime = DateTime.MinValue;
+            }
+
+            Thread.Sleep(10);
+        }
+    }
+
+    private static void DrawDocumentArchivePage()
+    {
+        ClearForRedraw();
+        Console.CursorVisible = false;
+        DrawHeader();
+        Console.WriteLine();
+        Console.WriteLine();
+        Console.ForegroundColor = ConsoleColor.Green;
+        Console.WriteLine("Upload / Archive Documents");
+        Console.WriteLine();
+    }
+
+    private static void DrawDocumentArchivePrompt()
+    {
+        Console.ForegroundColor = ConsoleColor.Gray;
+        if (Console.WindowWidth >= 60)
+            Console.Write("Drop/paste document paths here.  ");
+        WriteKeyBadge("[Enter]");
+        Console.ForegroundColor = ConsoleColor.Gray;
+        Console.Write(" Add    ");
+        WriteKeyBadge("[Esc]");
+        Console.ForegroundColor = ConsoleColor.Gray;
+        Console.WriteLine(" Back");
+        Console.ForegroundColor = ConsoleColor.White;
+        Console.Write("> ");
+        Console.ResetColor();
+        Console.CursorVisible = true;
+    }
+
+    private static void ProcessDocumentInput(
+        string input,
+        ref bool backupCreated)
+    {
+        IReadOnlyList<string> paths = ParseDocumentPaths(input);
+        if (paths.Count == 0)
+        {
+            Console.ForegroundColor = ConsoleColor.Red;
+            Console.WriteLine("No document paths were recognized.");
+            Console.ResetColor();
+            return;
+        }
+
+        foreach (string path in paths)
+        {
+            Console.WriteLine();
+            ProcessOneDocument(path, ref backupCreated);
+        }
+    }
+
+    private static void ProcessOneDocument(
+        string path,
+        ref bool backupCreated)
+    {
+        DocumentArchiveCandidate candidate;
+        try
+        {
+            candidate = DocumentArchiveService.Prepare(path);
+        }
+        catch (Exception exception)
+        {
+            Console.ForegroundColor = ConsoleColor.Red;
+            Console.WriteLine("Could not archive document.");
+            Console.ForegroundColor = ConsoleColor.Gray;
+            Console.WriteLine(exception.Message);
+            Console.ResetColor();
+            return;
+        }
+
+        Console.ForegroundColor = ConsoleColor.Gray;
+        Console.WriteLine($"File: {candidate.OriginalFileName}");
+        Console.WriteLine();
+
+        if (candidate.ExistingArchivedPath is not null)
+        {
+            Console.ForegroundColor = ConsoleColor.Yellow;
+            Console.WriteLine("Already archived.");
+            Console.ForegroundColor = ConsoleColor.Gray;
+            Console.WriteLine(candidate.ExistingArchivedPath);
+            Console.ResetColor();
+            return;
+        }
+
+        string[] typeLabels =
+        [
+            "Receipt",
+            "Additional Receipt",
+            "Tax Form",
+            "Insurance Statement"
+        ];
+        int suggestedType = (int)SuggestDocumentType(candidate.OriginalFileName) - 1;
+        int? selectedType = WaitForInlineSelection(
+            "What kind of document is this?",
+            typeLabels,
+            suggestedType);
+        if (selectedType is null)
+        {
+            WriteDocumentCancelled();
+            return;
+        }
+
+        ArchivedDocumentType documentType =
+            (ArchivedDocumentType)(selectedType.Value + 1);
+        int[] years = Enumerable.Range(
+                FirstAccountingYear,
+                DateTime.Today.Year - FirstAccountingYear + 1)
+            .Reverse()
+            .ToArray();
+        int suggestedYear = SuggestYear(candidate.OriginalFileName);
+        int yearIndex = Array.IndexOf(years, suggestedYear);
+        if (yearIndex < 0)
+            yearIndex = 0;
+        int? selectedYear = WaitForInlineSelection(
+            "Choose the accounting year:",
+            years.Select(value => value.ToString(CultureInfo.InvariantCulture)).ToArray(),
+            yearIndex);
+        if (selectedYear is null)
+        {
+            WriteDocumentCancelled();
+            return;
+        }
+
+        int year = years[selectedYear.Value];
+        int? month = null;
+        if (documentType == ArchivedDocumentType.Receipt)
+        {
+            string[] monthNames = CultureInfo.CurrentCulture.DateTimeFormat.MonthNames
+                .Take(12)
+                .ToArray();
+            int suggestedMonth = SuggestMonth(candidate.OriginalFileName, year);
+            int? selectedMonth = WaitForInlineSelection(
+                "Choose the receipt month:",
+                monthNames,
+                suggestedMonth - 1);
+            if (selectedMonth is null)
+            {
+                WriteDocumentCancelled();
+                return;
+            }
+            month = selectedMonth.Value + 1;
+        }
+
+        string suggestedName = SuggestDisplayName(
+            candidate.OriginalFileName,
+            documentType);
+        string? displayName = ReadNameWithDefault(suggestedName);
+        if (displayName is null)
+        {
+            WriteDocumentCancelled();
+            return;
+        }
+
+        try
+        {
+            if (!backupCreated)
+            {
+                DatabaseBackupService.CreateVerifiedBackup();
+                backupCreated = true;
+            }
+
+            DocumentArchiveResult result = DocumentArchiveService.Archive(
+                candidate,
+                documentType,
+                year,
+                month,
+                displayName);
+            WriteDocumentResult(result);
+        }
+        catch (Exception exception)
+        {
+            Console.ForegroundColor = ConsoleColor.Red;
+            Console.WriteLine("Could not archive document.");
+            Console.ForegroundColor = ConsoleColor.Gray;
+            Console.WriteLine(exception.Message);
+            Console.ResetColor();
+        }
+    }
+
+    private static int? WaitForInlineSelection(
+        string prompt,
+        IReadOnlyList<string> options,
+        int selectedIndex)
+    {
+        selectedIndex = Math.Clamp(selectedIndex, 0, options.Count - 1);
+        Console.ForegroundColor = ConsoleColor.Gray;
+        Console.WriteLine(prompt);
+        int optionsTop = Console.CursorTop;
+        for (int i = 0; i < options.Count; i++)
+        {
+            DrawMenuOptionLine(options[i], i == selectedIndex, Console.WindowWidth);
+            Console.WriteLine();
+        }
+
+        int controlsTop = Console.CursorTop;
+        Console.ForegroundColor = ConsoleColor.DarkGray;
+        Console.Write("Use ");
+        DrawKeyHint("↑/↓/←/→");
+        Console.ForegroundColor = ConsoleColor.DarkGray;
+        Console.Write(" or numbers, ");
+        DrawKeyHint("Enter");
+        Console.ForegroundColor = ConsoleColor.DarkGray;
+        Console.Write(" Select    ");
+        DrawKeyHint("Esc");
+        Console.ForegroundColor = ConsoleColor.DarkGray;
+        Console.WriteLine(" Cancel");
+
+        while (true)
+        {
+            ConsoleKeyInfo key = Console.ReadKey(intercept: true);
+            if (key.Key == ConsoleKey.Escape)
+            {
+                Console.WriteLine();
+                return null;
+            }
+
+            if (key.Key == ConsoleKey.Enter)
+            {
+                Console.WriteLine();
+                return selectedIndex;
+            }
+
+            int next = selectedIndex;
+            if (TryGetNavigationDelta(key.Key, out int delta))
+                next = WrapSelection(selectedIndex + delta, options.Count);
+            else if (TryGetNumericSelection(key.Key, options.Count, out int numeric))
+                next = numeric;
+
+            if (next == selectedIndex)
+                continue;
+
+            selectedIndex = next;
+            RedrawMenuOptions(optionsTop, options, selectedIndex);
+            try
+            {
+                Console.SetCursorPosition(0, controlsTop + 1);
+            }
+            catch (ArgumentOutOfRangeException)
+            {
+            }
+            catch (IOException)
+            {
+            }
+        }
+    }
+
+    private static string? ReadNameWithDefault(string suggestedName)
+    {
+        var buffer = new StringBuilder();
+        Console.ForegroundColor = ConsoleColor.Gray;
+        Console.Write($"Name [{suggestedName}]: ");
+        Console.ForegroundColor = ConsoleColor.White;
+
+        while (true)
+        {
+            ConsoleKeyInfo key = Console.ReadKey(intercept: true);
+            if (key.Key == ConsoleKey.Escape)
+            {
+                Console.WriteLine();
+                return null;
+            }
+            if (key.Key == ConsoleKey.Enter)
+            {
+                Console.WriteLine();
+                string entered = buffer.ToString().Trim();
+                return entered.Length == 0 ? suggestedName : entered;
+            }
+            if (key.Key == ConsoleKey.Backspace)
+            {
+                if (buffer.Length > 0)
+                {
+                    buffer.Length--;
+                    Console.Write("\b \b");
+                }
+                continue;
+            }
+            if (!char.IsControl(key.KeyChar))
+            {
+                buffer.Append(key.KeyChar);
+                Console.Write(key.KeyChar);
+            }
+        }
+    }
+
+    private static void WriteDocumentResult(DocumentArchiveResult result)
+    {
+        Console.ForegroundColor = result.AlreadyArchived
+            ? ConsoleColor.Yellow
+            : ConsoleColor.Green;
+        Console.WriteLine(result.AlreadyArchived
+            ? "Already archived."
+            : "Archived successfully.");
+        Console.WriteLine();
+        Console.ForegroundColor = ConsoleColor.Gray;
+        Console.WriteLine($"File:     {result.OriginalFileName}");
+        Console.WriteLine($"Type:     {DocumentArchiveService.GetTypeLabel(result.DocumentType)}");
+        Console.WriteLine($"Year:     {result.Year}");
+        if (result.Month.HasValue)
+            Console.WriteLine($"Month:    {CultureInfo.CurrentCulture.DateTimeFormat.GetMonthName(result.Month.Value)}");
+        Console.WriteLine($"Archived: {result.ArchivedPath}");
+        Console.ResetColor();
+    }
+
+    private static void WriteDocumentCancelled()
+    {
+        Console.ForegroundColor = ConsoleColor.Yellow;
+        Console.WriteLine("Document skipped.");
+        Console.ResetColor();
+    }
+
+    private static ArchivedDocumentType SuggestDocumentType(string fileName)
+    {
+        string stem = Path.GetFileNameWithoutExtension(fileName);
+        if (Regex.IsMatch(stem, @"(^|[^A-Z0-9])(W-?2|1099|TAX)([^A-Z0-9]|$)", RegexOptions.IgnoreCase))
+            return ArchivedDocumentType.TaxForm;
+        if (Regex.IsMatch(stem, @"BCBS|AETNA|CIGNA|UNITED\s*HEALTH\s*CARE|UNITEDHEALTHCARE|UMR", RegexOptions.IgnoreCase))
+            return ArchivedDocumentType.InsuranceStatement;
+        return ArchivedDocumentType.Receipt;
+    }
+
+    private static int SuggestYear(string fileName)
+    {
+        Match match = Regex.Match(fileName, @"(?<!\d)(20\d{2})(?!\d)");
+        return match.Success &&
+               int.TryParse(match.Value, NumberStyles.None, CultureInfo.InvariantCulture, out int year) &&
+               year >= FirstAccountingYear && year <= DateTime.Today.Year
+            ? year
+            : DateTime.Today.Year;
+    }
+
+    private static int SuggestMonth(string fileName, int year)
+    {
+        string stem = Path.GetFileNameWithoutExtension(fileName);
+        Match yearMonth = Regex.Match(
+            stem,
+            $@"(?<!\d){year}[-_. ](0?[1-9]|1[0-2])(?!\d)");
+        if (yearMonth.Success && int.TryParse(
+                yearMonth.Groups[1].Value,
+                NumberStyles.None,
+                CultureInfo.InvariantCulture,
+                out int month))
+        {
+            return month;
+        }
+
+        Match monthDayYear = Regex.Match(
+            stem,
+            @"(?<!\d)(0?[1-9]|1[0-2])[-_. ](?:0?[1-9]|[12]\d|3[01])[-_. ]20\d{2}(?!\d)");
+        if (monthDayYear.Success && int.TryParse(
+                monthDayYear.Groups[1].Value,
+                NumberStyles.None,
+                CultureInfo.InvariantCulture,
+                out month))
+        {
+            return month;
+        }
+
+        Match compactYearMonth = Regex.Match(
+            stem,
+            @"(?<!\d)20\d{2}(0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])(?!\d)");
+        if (compactYearMonth.Success && int.TryParse(
+                compactYearMonth.Groups[1].Value,
+                NumberStyles.None,
+                CultureInfo.InvariantCulture,
+                out month))
+        {
+            return month;
+        }
+
+        for (int candidate = 1; candidate <= 12; candidate++)
+        {
+            string full = CultureInfo.InvariantCulture.DateTimeFormat.GetMonthName(candidate);
+            string abbreviated = CultureInfo.InvariantCulture.DateTimeFormat.GetAbbreviatedMonthName(candidate);
+            if (stem.Contains(full, StringComparison.OrdinalIgnoreCase) ||
+                Regex.IsMatch(stem, $@"(^|[^A-Za-z]){Regex.Escape(abbreviated)}([^A-Za-z]|$)", RegexOptions.IgnoreCase))
+            {
+                return candidate;
+            }
+        }
+
+        return DateTime.Today.Month;
+    }
+
+    private static string SuggestDisplayName(
+        string fileName,
+        ArchivedDocumentType documentType)
+    {
+        string stem = Path.GetFileNameWithoutExtension(fileName).Trim();
+        if (Regex.IsMatch(stem, @"^(scan|document|img)[ _-]*\d*$", RegexOptions.IgnoreCase))
+        {
+            return documentType switch
+            {
+                ArchivedDocumentType.Receipt => "Receipt_001",
+                ArchivedDocumentType.AdditionalReceipt => "Additional_Receipt_001",
+                ArchivedDocumentType.TaxForm => "Tax_Form_001",
+                ArchivedDocumentType.InsuranceStatement => "Insurance_Statement_001",
+                _ => "Document_001"
+            };
+        }
+
+        stem = Regex.Replace(
+            stem,
+            @"^20\d{2}[-_. ]+(?:0[1-9]|1[0-2])[-_. ]+",
+            string.Empty);
+        stem = Regex.Replace(stem, @"^20\d{2}[-_. ]+", string.Empty);
+        stem = Regex.Replace(stem, @"[-_. ]+20\d{2}$", string.Empty);
+        string suggested = Regex.Replace(stem, @"\s+", "_");
+        return suggested.Length == 0 ? "Document_001" : suggested;
+    }
+
+    private static IReadOnlyList<string> ParseDocumentPaths(string input)
+    {
+        string wholePath = NormalizePathInput(input);
+        if (File.Exists(wholePath))
+            return [Path.GetFullPath(wholePath)];
+
+        var paths = new List<string>();
+        foreach (Match match in Regex.Matches(input, "\"([^\"]+)\"|'([^']+)'|(\\S+)"))
+        {
+            string value = match.Groups[1].Success
+                ? match.Groups[1].Value
+                : match.Groups[2].Success
+                    ? match.Groups[2].Value
+                    : match.Groups[3].Value;
+            if (!string.IsNullOrWhiteSpace(value))
+                paths.Add(Path.GetFullPath(NormalizePathInput(value)));
+        }
+        return paths;
+    }
+
+    private static bool TryParseExistingDocumentPaths(
+        string input,
+        out IReadOnlyList<string> paths)
+    {
+        paths = ParseDocumentPaths(input);
+        return paths.Count > 0 && paths.All(File.Exists);
     }
 
     private static void NotImplemented(
@@ -1658,7 +2043,7 @@ internal static class Program
     private static void ClearForRedraw()
     {
         Console.Write(
-            "\x1b[2J\x1b[3J\x1b[H");
+            "\x1b[2J\x1b[H");
     }
 
     private static void WriteCenteredBlock(
@@ -1690,13 +2075,7 @@ internal static class Program
         int WindowWidth,
         int WindowHeight);
 
-    private readonly record struct ImportPageLayout(
-        int PromptTop,
-        int WindowWidth,
-        int WindowHeight);
-
     private sealed record ImportPageEntry(
-        string Path,
         string Status,
         ConsoleColor StatusColor,
         IReadOnlyList<string> DetailLines);
@@ -1723,8 +2102,7 @@ internal static class Program
     {
         ImportChase,
         AccountingWorksheet,
-        ReceiptScans,
-        InsuranceAndTaxForms,
+        DocumentArchive,
         About,
         Exit
     }
