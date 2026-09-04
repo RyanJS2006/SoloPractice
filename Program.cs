@@ -136,7 +136,7 @@ internal static class Program
                     break;
 
                 case MainMenuAction.About:
-                    NotImplemented("About");
+                    RunAbout();
                     break;
 
                 case MainMenuAction.Exit:
@@ -188,7 +188,7 @@ internal static class Program
 
                     RestoreInputCursor(
                         layout.PromptTop,
-                        "CSV > ",
+                        "Chase CSV > ",
                         buffer.ToString());
                     continue;
                 }
@@ -208,7 +208,7 @@ internal static class Program
 
                     RestoreInputCursor(
                         layout.PromptTop,
-                        "CSV > ",
+                        "Chase CSV > ",
                         buffer.ToString());
                     continue;
                 }
@@ -316,7 +316,7 @@ internal static class Program
         Console.WriteLine("""
             
 
-            SoloPractice is a C# program meant to turn CSV files downloaded from Chase's website into a flexible database of transactions. This database can then be used to automate and streamline accounting by automatically filling in most of the cells in a spreadsheet. There are also tools for organizing scans of receipts, insurance company statements, and tax forms.
+            SoloPractice keeps the practice's accounting files organized in one place. Import Chase downloads, create and sync yearly accounting spreadsheets, and archive scanned receipts, tax forms, and insurance statements.
             
             """);
 
@@ -357,7 +357,7 @@ internal static class Program
 
         Console.ForegroundColor = ConsoleColor.White;
         int promptTop = Console.CursorTop;
-        Console.Write("CSV > ");
+        Console.Write("Chase CSV > ");
         Console.Write(inputBuffer);
         Console.ResetColor();
         Console.CursorVisible = true;
@@ -1507,86 +1507,23 @@ internal static class Program
             return;
         }
 
-        Console.ForegroundColor = ConsoleColor.Gray;
-        Console.WriteLine($"File: {candidate.OriginalFileName}");
-        Console.WriteLine();
-
         if (candidate.ExistingArchivedPath is not null)
         {
             Console.ForegroundColor = ConsoleColor.Yellow;
             Console.WriteLine("Already archived.");
             Console.ForegroundColor = ConsoleColor.Gray;
-            Console.WriteLine(candidate.ExistingArchivedPath);
+            Console.WriteLine($"File:     {candidate.OriginalFileName}");
+            Console.WriteLine($"Archived: {candidate.ExistingArchivedPath}");
             Console.ResetColor();
             return;
         }
 
-        string[] typeLabels =
-        [
-            "Receipt",
-            "Additional Receipt",
-            "Tax Form",
-            "Insurance Statement"
-        ];
-        int suggestedType = (int)SuggestDocumentType(candidate.OriginalFileName) - 1;
-        int? selectedType = WaitForInlineSelection(
-            "What kind of document is this?",
-            typeLabels,
-            suggestedType);
-        if (selectedType is null)
-        {
-            WriteDocumentCancelled();
-            return;
-        }
+        DocumentArchivePlan? plan =
+            RunDocumentArchiveWizard(candidate);
 
-        ArchivedDocumentType documentType =
-            (ArchivedDocumentType)(selectedType.Value + 1);
-        int[] years = Enumerable.Range(
-                FirstAccountingYear,
-                DateTime.Today.Year - FirstAccountingYear + 1)
-            .Reverse()
-            .ToArray();
-        int suggestedYear = SuggestYear(candidate.OriginalFileName);
-        int yearIndex = Array.IndexOf(years, suggestedYear);
-        if (yearIndex < 0)
-            yearIndex = 0;
-        int? selectedYear = WaitForInlineSelection(
-            "Choose the accounting year:",
-            years.Select(value => value.ToString(CultureInfo.InvariantCulture)).ToArray(),
-            yearIndex);
-        if (selectedYear is null)
+        if (plan is null)
         {
-            WriteDocumentCancelled();
-            return;
-        }
-
-        int year = years[selectedYear.Value];
-        int? month = null;
-        if (documentType == ArchivedDocumentType.Receipt)
-        {
-            string[] monthNames = CultureInfo.CurrentCulture.DateTimeFormat.MonthNames
-                .Take(12)
-                .ToArray();
-            int suggestedMonth = SuggestMonth(candidate.OriginalFileName, year);
-            int? selectedMonth = WaitForInlineSelection(
-                "Choose the receipt month:",
-                monthNames,
-                suggestedMonth - 1);
-            if (selectedMonth is null)
-            {
-                WriteDocumentCancelled();
-                return;
-            }
-            month = selectedMonth.Value + 1;
-        }
-
-        string suggestedName = SuggestDisplayName(
-            candidate.OriginalFileName,
-            documentType);
-        string? displayName = ReadNameWithDefault(suggestedName);
-        if (displayName is null)
-        {
-            WriteDocumentCancelled();
+            WriteDocumentCancelled(candidate.OriginalFileName);
             return;
         }
 
@@ -1600,10 +1537,10 @@ internal static class Program
 
             DocumentArchiveResult result = DocumentArchiveService.Archive(
                 candidate,
-                documentType,
-                year,
-                month,
-                displayName);
+                plan.DocumentType,
+                plan.Year,
+                plan.Month,
+                plan.DisplayName);
             WriteDocumentResult(result);
         }
         catch (Exception exception)
@@ -1616,109 +1553,700 @@ internal static class Program
         }
     }
 
-    private static int? WaitForInlineSelection(
+    private static DocumentArchivePlan? RunDocumentArchiveWizard(
+        DocumentArchiveCandidate candidate)
+    {
+        EnterAlternateScreen();
+
+        try
+        {
+            string[] typeLabels =
+            [
+                "Receipt",
+                "Additional Receipt",
+                "Tax Form",
+                "Insurance Statement"
+            ];
+
+            int suggestedType =
+                (int)SuggestDocumentType(candidate.OriginalFileName) - 1;
+
+            int? selectedType = WaitForDocumentSelectionPage(
+                candidate.OriginalFileName,
+                "What kind of document is this?",
+                typeLabels,
+                suggestedType,
+                selectedTypeLabel: null,
+                selectedYear: null,
+                selectedMonth: null,
+                useGrid: false);
+
+            if (selectedType is null)
+                return null;
+
+            ArchivedDocumentType documentType =
+                (ArchivedDocumentType)(selectedType.Value + 1);
+            string typeLabel =
+                DocumentArchiveService.GetTypeLabel(documentType);
+
+            int[] years = Enumerable.Range(
+                    FirstAccountingYear,
+                    DateTime.Today.Year - FirstAccountingYear + 1)
+                .Reverse()
+                .ToArray();
+
+            int suggestedYear = SuggestYear(candidate.OriginalFileName);
+            int yearIndex = Array.IndexOf(years, suggestedYear);
+            if (yearIndex < 0)
+                yearIndex = 0;
+
+            int? selectedYear = WaitForDocumentSelectionPage(
+                candidate.OriginalFileName,
+                "Choose the accounting year:",
+                years.Select(value =>
+                    value.ToString(CultureInfo.InvariantCulture)).ToArray(),
+                yearIndex,
+                typeLabel,
+                selectedYear: null,
+                selectedMonth: null,
+                useGrid: false);
+
+            if (selectedYear is null)
+                return null;
+
+            int year = years[selectedYear.Value];
+            int? month = null;
+
+            if (documentType == ArchivedDocumentType.Receipt)
+            {
+                string[] monthNames = CultureInfo.CurrentCulture
+                    .DateTimeFormat.MonthNames
+                    .Take(12)
+                    .ToArray();
+
+                int suggestedMonth =
+                    SuggestMonth(candidate.OriginalFileName, year);
+
+                int? selectedMonth = WaitForDocumentSelectionPage(
+                    candidate.OriginalFileName,
+                    "Choose the receipt month:",
+                    monthNames,
+                    suggestedMonth - 1,
+                    typeLabel,
+                    year,
+                    selectedMonth: null,
+                    useGrid: true);
+
+                if (selectedMonth is null)
+                    return null;
+
+                month = selectedMonth.Value + 1;
+            }
+
+            string suggestedName = SuggestDisplayName(
+                candidate.OriginalFileName,
+                documentType);
+
+            string? displayName = ReadDocumentNamePage(
+                candidate.OriginalFileName,
+                typeLabel,
+                year,
+                month,
+                suggestedName);
+
+            if (displayName is null)
+                return null;
+
+            return new DocumentArchivePlan(
+                documentType,
+                year,
+                month,
+                displayName);
+        }
+        finally
+        {
+            ExitAlternateScreen();
+        }
+    }
+
+    private static int? WaitForDocumentSelectionPage(
+        string fileName,
         string prompt,
         IReadOnlyList<string> options,
-        int selectedIndex)
+        int selectedIndex,
+        string? selectedTypeLabel,
+        int? selectedYear,
+        int? selectedMonth,
+        bool useGrid)
     {
+        if (options.Count == 0)
+            throw new ArgumentException("At least one option is required.", nameof(options));
+
         selectedIndex = Math.Clamp(selectedIndex, 0, options.Count - 1);
-        Console.ForegroundColor = ConsoleColor.Gray;
-        Console.WriteLine(prompt);
-        int optionsTop = Console.CursorTop;
-        for (int i = 0; i < options.Count; i++)
+        var numberBuffer = new StringBuilder();
+        DateTime lastNumberKeyTime = DateTime.MinValue;
+
+        DocumentSelectionLayout layout = DrawDocumentSelectionPage(
+            fileName,
+            prompt,
+            options,
+            selectedIndex,
+            selectedTypeLabel,
+            selectedYear,
+            selectedMonth,
+            useGrid);
+
+        int drawnWidth = layout.WindowWidth;
+        int drawnHeight = layout.WindowHeight;
+        int latestWidth = drawnWidth;
+        int latestHeight = drawnHeight;
+        DateTime lastResizeTime = DateTime.MinValue;
+
+        while (true)
         {
-            DrawMenuOptionLine(options[i], i == selectedIndex, Console.WindowWidth);
-            Console.WriteLine();
+            while (Console.KeyAvailable)
+            {
+                ConsoleKeyInfo key = Console.ReadKey(intercept: true);
+
+                if (key.Key == ConsoleKey.Escape)
+                    return null;
+
+                if (key.Key == ConsoleKey.Enter)
+                    return selectedIndex;
+
+                int next = selectedIndex;
+                bool changed = false;
+
+                if (TryGetDocumentNavigationDelta(
+                        key.Key,
+                        layout.Columns,
+                        out int delta))
+                {
+                    numberBuffer.Clear();
+                    next = WrapSelection(selectedIndex + delta, options.Count);
+                    changed = next != selectedIndex;
+                }
+                else if (TryGetDigitKey(key.Key, out int digit))
+                {
+                    DateTime now = DateTime.UtcNow;
+                    if ((now - lastNumberKeyTime).TotalMilliseconds > 800)
+                        numberBuffer.Clear();
+
+                    numberBuffer.Append((char)('0' + digit));
+                    lastNumberKeyTime = now;
+
+                    if (numberBuffer.Length > 2)
+                    {
+                        char last = numberBuffer[^1];
+                        numberBuffer.Clear();
+                        numberBuffer.Append(last);
+                    }
+
+                    if (int.TryParse(
+                            numberBuffer.ToString(),
+                            NumberStyles.None,
+                            CultureInfo.InvariantCulture,
+                            out int number) &&
+                        number >= 1 &&
+                        number <= options.Count)
+                    {
+                        next = number - 1;
+                        changed = next != selectedIndex;
+                    }
+                    else if (!HasNumericOptionPrefix(
+                                 numberBuffer.ToString(),
+                                 options.Count))
+                    {
+                        numberBuffer.Clear();
+                    }
+                }
+
+                if (!changed)
+                    continue;
+
+                selectedIndex = next;
+                RedrawDocumentOptions(
+                    layout.OptionsTop,
+                    options,
+                    selectedIndex,
+                    layout.Columns,
+                    layout.CellWidth);
+            }
+
+            int currentWidth = Console.WindowWidth;
+            int currentHeight = Console.WindowHeight;
+
+            if (currentWidth != latestWidth ||
+                currentHeight != latestHeight)
+            {
+                latestWidth = currentWidth;
+                latestHeight = currentHeight;
+                lastResizeTime = DateTime.UtcNow;
+            }
+
+            bool sizeChanged =
+                latestWidth != drawnWidth ||
+                latestHeight != drawnHeight;
+
+            bool resizeSettled =
+                (DateTime.UtcNow - lastResizeTime)
+                    .TotalMilliseconds >= ResizeDebounceMilliseconds;
+
+            if (sizeChanged && resizeSettled)
+            {
+                layout = DrawDocumentSelectionPage(
+                    fileName,
+                    prompt,
+                    options,
+                    selectedIndex,
+                    selectedTypeLabel,
+                    selectedYear,
+                    selectedMonth,
+                    useGrid);
+
+                drawnWidth = layout.WindowWidth;
+                drawnHeight = layout.WindowHeight;
+                latestWidth = drawnWidth;
+                latestHeight = drawnHeight;
+            }
+
+            Thread.Sleep(10);
+        }
+    }
+
+    private static DocumentSelectionLayout DrawDocumentSelectionPage(
+        string fileName,
+        string prompt,
+        IReadOnlyList<string> options,
+        int selectedIndex,
+        string? selectedTypeLabel,
+        int? selectedYear,
+        int? selectedMonth,
+        bool useGrid)
+    {
+        ClearForRedraw();
+        Console.CursorVisible = false;
+
+        DrawHeader();
+        Console.WriteLine();
+        Console.WriteLine();
+
+        Console.ForegroundColor = ConsoleColor.Green;
+        Console.WriteLine("Upload / Archive Documents");
+        Console.WriteLine();
+
+        Console.ForegroundColor = ConsoleColor.Gray;
+        Console.WriteLine($"File:  {fileName}");
+        if (!string.IsNullOrWhiteSpace(selectedTypeLabel))
+            Console.WriteLine($"Type:  {selectedTypeLabel}");
+        if (selectedYear.HasValue)
+            Console.WriteLine($"Year:  {selectedYear.Value}");
+        if (selectedMonth.HasValue)
+        {
+            Console.WriteLine(
+                $"Month: {CultureInfo.CurrentCulture.DateTimeFormat.GetMonthName(selectedMonth.Value)}");
         }
 
-        int controlsTop = Console.CursorTop;
+        Console.WriteLine();
+        Console.ForegroundColor = ConsoleColor.White;
+        Console.WriteLine(prompt);
+        Console.WriteLine();
+
+        int columns = useGrid
+            ? GetDocumentGridColumns(Console.WindowWidth, options.Count)
+            : 1;
+        int cellWidth = Math.Max(
+            1,
+            Math.Max(1, Console.WindowWidth - 1) / columns);
+        int optionsTop = Console.CursorTop;
+
+        DrawDocumentOptions(
+            options,
+            selectedIndex,
+            columns,
+            cellWidth);
+
+        Console.WriteLine();
         Console.ForegroundColor = ConsoleColor.DarkGray;
         Console.Write("Use ");
         DrawKeyHint("↑/↓/←/→");
         Console.ForegroundColor = ConsoleColor.DarkGray;
-        Console.Write(" or numbers, ");
+        Console.Write(" or ");
+        DrawKeyHint($"1-{options.Count}");
+        Console.ForegroundColor = ConsoleColor.DarkGray;
+        Console.Write(" to choose    ");
         DrawKeyHint("Enter");
         Console.ForegroundColor = ConsoleColor.DarkGray;
         Console.Write(" Select    ");
         DrawKeyHint("Esc");
         Console.ForegroundColor = ConsoleColor.DarkGray;
         Console.WriteLine(" Cancel");
+        Console.ResetColor();
 
-        while (true)
+        return new DocumentSelectionLayout(
+            optionsTop,
+            columns,
+            cellWidth,
+            Console.WindowWidth,
+            Console.WindowHeight);
+    }
+
+    private static void DrawDocumentOptions(
+        IReadOnlyList<string> options,
+        int selectedIndex,
+        int columns,
+        int cellWidth)
+    {
+        int rows = (options.Count + columns - 1) / columns;
+
+        for (int row = 0; row < rows; row++)
         {
-            ConsoleKeyInfo key = Console.ReadKey(intercept: true);
-            if (key.Key == ConsoleKey.Escape)
+            for (int column = 0; column < columns; column++)
             {
-                Console.WriteLine();
-                return null;
+                int index = row * columns + column;
+                if (index >= options.Count)
+                {
+                    Console.Write(new string(' ', cellWidth));
+                    continue;
+                }
+
+                DrawDocumentOptionCell(
+                    index,
+                    options[index],
+                    index == selectedIndex,
+                    cellWidth);
             }
 
-            if (key.Key == ConsoleKey.Enter)
-            {
-                Console.WriteLine();
-                return selectedIndex;
-            }
-
-            int next = selectedIndex;
-            if (TryGetNavigationDelta(key.Key, out int delta))
-                next = WrapSelection(selectedIndex + delta, options.Count);
-            else if (TryGetNumericSelection(key.Key, options.Count, out int numeric))
-                next = numeric;
-
-            if (next == selectedIndex)
-                continue;
-
-            selectedIndex = next;
-            RedrawMenuOptions(optionsTop, options, selectedIndex);
-            try
-            {
-                Console.SetCursorPosition(0, controlsTop + 1);
-            }
-            catch (ArgumentOutOfRangeException)
-            {
-            }
-            catch (IOException)
-            {
-            }
+            Console.WriteLine();
         }
     }
 
-    private static string? ReadNameWithDefault(string suggestedName)
+    private static void RedrawDocumentOptions(
+        int optionsTop,
+        IReadOnlyList<string> options,
+        int selectedIndex,
+        int columns,
+        int cellWidth)
+    {
+        Console.CursorVisible = false;
+        int rows = (options.Count + columns - 1) / columns;
+
+        try
+        {
+            for (int row = 0; row < rows; row++)
+            {
+                Console.SetCursorPosition(0, optionsTop + row);
+
+                for (int column = 0; column < columns; column++)
+                {
+                    int index = row * columns + column;
+                    if (index >= options.Count)
+                    {
+                        Console.Write(new string(' ', cellWidth));
+                        continue;
+                    }
+
+                    DrawDocumentOptionCell(
+                        index,
+                        options[index],
+                        index == selectedIndex,
+                        cellWidth);
+                }
+
+                int usedWidth = Math.Min(
+                    Console.WindowWidth,
+                    columns * cellWidth);
+                int remainder = Math.Max(
+                    0,
+                    Console.WindowWidth - usedWidth - 1);
+                if (remainder > 0)
+                    Console.Write(new string(' ', remainder));
+            }
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+        }
+        catch (IOException)
+        {
+        }
+    }
+
+    private static void DrawDocumentOptionCell(
+        int index,
+        string label,
+        bool selected,
+        int cellWidth)
+    {
+        string numberedLabel =
+            $"{index + 1,2}. {label}";
+        int contentWidth = Math.Max(1, cellWidth - 3);
+
+        if (numberedLabel.Length > contentWidth)
+        {
+            numberedLabel = contentWidth <= 1
+                ? numberedLabel[..contentWidth]
+                : numberedLabel[..(contentWidth - 1)] + "…";
+        }
+
+        Console.ResetColor();
+        Console.ForegroundColor = selected
+            ? ConsoleColor.Magenta
+            : ConsoleColor.DarkGray;
+        Console.Write(selected ? " > " : "   ");
+
+        if (selected)
+        {
+            Console.ForegroundColor = ConsoleColor.Black;
+            Console.BackgroundColor = ConsoleColor.Magenta;
+            Console.Write(numberedLabel);
+            Console.ResetColor();
+        }
+        else
+        {
+            Console.ForegroundColor = ConsoleColor.Gray;
+            Console.Write(numberedLabel);
+        }
+
+        int padding = Math.Max(
+            0,
+            cellWidth - 3 - numberedLabel.Length);
+        if (padding > 0)
+            Console.Write(new string(' ', padding));
+
+        Console.ResetColor();
+    }
+
+    private static int GetDocumentGridColumns(
+        int windowWidth,
+        int optionCount)
+    {
+        if (optionCount <= 4)
+            return 1;
+
+        if (windowWidth >= 76)
+            return 4;
+
+        if (windowWidth >= 54)
+            return 3;
+
+        return 2;
+    }
+
+    private static bool TryGetDocumentNavigationDelta(
+        ConsoleKey key,
+        int columns,
+        out int delta)
+    {
+        delta = key switch
+        {
+            ConsoleKey.LeftArrow => -1,
+            ConsoleKey.RightArrow => 1,
+            ConsoleKey.UpArrow => -columns,
+            ConsoleKey.DownArrow => columns,
+            _ => 0
+        };
+
+        return delta != 0;
+    }
+
+    private static bool TryGetDigitKey(
+        ConsoleKey key,
+        out int digit)
+    {
+        digit = key switch
+        {
+            ConsoleKey.D0 or ConsoleKey.NumPad0 => 0,
+            ConsoleKey.D1 or ConsoleKey.NumPad1 => 1,
+            ConsoleKey.D2 or ConsoleKey.NumPad2 => 2,
+            ConsoleKey.D3 or ConsoleKey.NumPad3 => 3,
+            ConsoleKey.D4 or ConsoleKey.NumPad4 => 4,
+            ConsoleKey.D5 or ConsoleKey.NumPad5 => 5,
+            ConsoleKey.D6 or ConsoleKey.NumPad6 => 6,
+            ConsoleKey.D7 or ConsoleKey.NumPad7 => 7,
+            ConsoleKey.D8 or ConsoleKey.NumPad8 => 8,
+            ConsoleKey.D9 or ConsoleKey.NumPad9 => 9,
+            _ => -1
+        };
+
+        return digit >= 0;
+    }
+
+    private static bool HasNumericOptionPrefix(
+        string prefix,
+        int optionCount)
+    {
+        if (prefix.Length == 0)
+            return true;
+
+        for (int number = 1; number <= optionCount; number++)
+        {
+            if (number.ToString(CultureInfo.InvariantCulture)
+                .StartsWith(prefix, StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static string? ReadDocumentNamePage(
+        string fileName,
+        string typeLabel,
+        int year,
+        int? month,
+        string suggestedName)
     {
         var buffer = new StringBuilder();
-        Console.ForegroundColor = ConsoleColor.Gray;
-        Console.Write($"Name [{suggestedName}]: ");
-        Console.ForegroundColor = ConsoleColor.White;
+        DrawDocumentNamePage(
+            fileName,
+            typeLabel,
+            year,
+            month,
+            suggestedName,
+            buffer.ToString());
+
+        int drawnWidth = Console.WindowWidth;
+        int drawnHeight = Console.WindowHeight;
+        int latestWidth = drawnWidth;
+        int latestHeight = drawnHeight;
+        DateTime lastResizeTime = DateTime.MinValue;
 
         while (true)
         {
-            ConsoleKeyInfo key = Console.ReadKey(intercept: true);
-            if (key.Key == ConsoleKey.Escape)
+            while (Console.KeyAvailable)
             {
-                Console.WriteLine();
-                return null;
-            }
-            if (key.Key == ConsoleKey.Enter)
-            {
-                Console.WriteLine();
-                string entered = buffer.ToString().Trim();
-                return entered.Length == 0 ? suggestedName : entered;
-            }
-            if (key.Key == ConsoleKey.Backspace)
-            {
-                if (buffer.Length > 0)
+                ConsoleKeyInfo key = Console.ReadKey(intercept: true);
+
+                if (key.Key == ConsoleKey.Escape)
+                    return null;
+
+                if (key.Key == ConsoleKey.Enter)
                 {
-                    buffer.Length--;
-                    Console.Write("\b \b");
+                    string entered = buffer.ToString().Trim();
+                    return entered.Length == 0
+                        ? suggestedName
+                        : entered;
                 }
-                continue;
+
+                if (key.Key == ConsoleKey.Backspace)
+                {
+                    if (buffer.Length > 0)
+                    {
+                        buffer.Length--;
+                        Console.Write("\b \b");
+                    }
+                    continue;
+                }
+
+                if (!char.IsControl(key.KeyChar))
+                {
+                    buffer.Append(key.KeyChar);
+                    Console.Write(key.KeyChar);
+                }
             }
-            if (!char.IsControl(key.KeyChar))
+
+            int currentWidth = Console.WindowWidth;
+            int currentHeight = Console.WindowHeight;
+
+            if (currentWidth != latestWidth ||
+                currentHeight != latestHeight)
             {
-                buffer.Append(key.KeyChar);
-                Console.Write(key.KeyChar);
+                latestWidth = currentWidth;
+                latestHeight = currentHeight;
+                lastResizeTime = DateTime.UtcNow;
             }
+
+            bool sizeChanged =
+                latestWidth != drawnWidth ||
+                latestHeight != drawnHeight;
+
+            bool resizeSettled =
+                (DateTime.UtcNow - lastResizeTime)
+                    .TotalMilliseconds >= ResizeDebounceMilliseconds;
+
+            if (sizeChanged && resizeSettled)
+            {
+                DrawDocumentNamePage(
+                    fileName,
+                    typeLabel,
+                    year,
+                    month,
+                    suggestedName,
+                    buffer.ToString());
+                drawnWidth = Console.WindowWidth;
+                drawnHeight = Console.WindowHeight;
+                latestWidth = drawnWidth;
+                latestHeight = drawnHeight;
+            }
+
+            Thread.Sleep(10);
         }
+    }
+
+    private static void DrawDocumentNamePage(
+        string fileName,
+        string typeLabel,
+        int year,
+        int? month,
+        string suggestedName,
+        string inputBuffer)
+    {
+        ClearForRedraw();
+        Console.CursorVisible = false;
+
+        DrawHeader();
+        Console.WriteLine();
+        Console.WriteLine();
+
+        Console.ForegroundColor = ConsoleColor.Green;
+        Console.WriteLine("Upload / Archive Documents");
+        Console.WriteLine();
+
+        Console.ForegroundColor = ConsoleColor.Gray;
+        Console.WriteLine($"File:  {fileName}");
+        Console.WriteLine($"Type:  {typeLabel}");
+        Console.WriteLine($"Year:  {year}");
+        if (month.HasValue)
+        {
+            Console.WriteLine(
+                $"Month: {CultureInfo.CurrentCulture.DateTimeFormat.GetMonthName(month.Value)}");
+        }
+
+        Console.WriteLine();
+        Console.WriteLine(
+            "Choose a short, recognizable name for the archived file.");
+        Console.ForegroundColor = ConsoleColor.DarkGray;
+        Console.Write("Press ");
+        DrawKeyHint("Enter");
+        Console.ForegroundColor = ConsoleColor.DarkGray;
+        Console.Write(" to keep the suggested name, or ");
+        DrawKeyHint("Esc");
+        Console.ForegroundColor = ConsoleColor.DarkGray;
+        Console.WriteLine(" to cancel.");
+        Console.WriteLine();
+
+        Console.ForegroundColor = ConsoleColor.Gray;
+        Console.Write($"Name [{suggestedName}]: ");
+        Console.ForegroundColor = ConsoleColor.White;
+        Console.Write(inputBuffer);
+        Console.ResetColor();
+        Console.CursorVisible = true;
+    }
+
+    private static void EnterAlternateScreen()
+    {
+        Console.CursorVisible = false;
+        Console.Write("\x1b[?1049h");
+        Console.Out.Flush();
+    }
+
+    private static void ExitAlternateScreen()
+    {
+        Console.ResetColor();
+        Console.CursorVisible = false;
+        Console.Write("\x1b[?1049l");
+        Console.Out.Flush();
     }
 
     private static void WriteDocumentResult(DocumentArchiveResult result)
@@ -1740,10 +2268,12 @@ internal static class Program
         Console.ResetColor();
     }
 
-    private static void WriteDocumentCancelled()
+    private static void WriteDocumentCancelled(string fileName)
     {
         Console.ForegroundColor = ConsoleColor.Yellow;
         Console.WriteLine("Document skipped.");
+        Console.ForegroundColor = ConsoleColor.Gray;
+        Console.WriteLine($"File: {fileName}");
         Console.ResetColor();
     }
 
@@ -1873,6 +2403,65 @@ internal static class Program
     {
         paths = ParseDocumentPaths(input);
         return paths.Count > 0 && paths.All(File.Exists);
+    }
+
+    private static void RunAbout()
+    {
+        WaitForEscapeWithResize(DrawAboutPage);
+    }
+
+    private static void DrawAboutPage()
+    {
+        ClearForRedraw();
+        Console.CursorVisible = false;
+
+        DrawHeader();
+        Console.WriteLine();
+        Console.WriteLine();
+
+        Console.ForegroundColor = ConsoleColor.Green;
+        Console.WriteLine("About SoloPractice");
+        Console.WriteLine();
+
+        Console.ForegroundColor = ConsoleColor.Gray;
+        Console.WriteLine(
+            "SoloPractice is a local accounting and document-organization tool designed to make the practice's routine bookkeeping easier.");
+        Console.WriteLine();
+
+        Console.ForegroundColor = ConsoleColor.White;
+        Console.WriteLine("What SoloPractice does");
+        Console.ForegroundColor = ConsoleColor.Gray;
+        Console.WriteLine("  - Imports Chase CSV downloads into the SoloPractice database.");
+        Console.WriteLine("  - Generates, updates, opens, and syncs yearly accounting spreadsheets.");
+        Console.WriteLine("  - Archives receipts, tax forms, and insurance statements into year-based folders.");
+        Console.WriteLine("  - Detects duplicate archived documents and creates verified database backups before write operations.");
+        Console.WriteLine();
+
+        Console.ForegroundColor = ConsoleColor.White;
+        Console.WriteLine("Where your files are kept");
+        Console.ForegroundColor = ConsoleColor.Gray;
+        Console.WriteLine($"  Data folder: {AppPaths.ApplicationDirectory}");
+        Console.WriteLine($"  Database:    {AppPaths.DatabasePath}");
+        Console.WriteLine($"  Backups:     {AppPaths.BackupsDirectory}");
+        Console.WriteLine();
+        Console.WriteLine(
+            "SoloPractice works with local files; the data folder can be changed with the SOLOPRACTICE_DATA_DIRECTORY environment variable.");
+
+        Version? version = typeof(Program).Assembly.GetName().Version;
+        if (version is not null)
+        {
+            Console.WriteLine();
+            Console.ForegroundColor = ConsoleColor.DarkGray;
+            Console.WriteLine($"Version {version}");
+        }
+
+        Console.WriteLine();
+        Console.ForegroundColor = ConsoleColor.DarkGray;
+        Console.Write("Press ");
+        WriteKeyBadge("[Esc]");
+        Console.ForegroundColor = ConsoleColor.DarkGray;
+        Console.WriteLine(" Back");
+        Console.ResetColor();
     }
 
     private static void NotImplemented(
@@ -2042,8 +2631,23 @@ internal static class Program
 
     private static void ClearForRedraw()
     {
-        Console.Write(
-            "\x1b[2J\x1b[H");
+        Console.ResetColor();
+        Console.CursorVisible = false;
+
+        try
+        {
+            Console.Clear();
+        }
+        catch (IOException)
+        {
+            Console.Write("\x1b[2J\x1b[H");
+        }
+        catch (PlatformNotSupportedException)
+        {
+            Console.Write("\x1b[2J\x1b[H");
+        }
+
+        Console.Out.Flush();
     }
 
     private static void WriteCenteredBlock(
@@ -2068,6 +2672,19 @@ internal static class Program
             Console.WriteLine(line);
         }
     }
+
+    private readonly record struct DocumentSelectionLayout(
+        int OptionsTop,
+        int Columns,
+        int CellWidth,
+        int WindowWidth,
+        int WindowHeight);
+
+    private sealed record DocumentArchivePlan(
+        ArchivedDocumentType DocumentType,
+        int Year,
+        int? Month,
+        string DisplayName);
 
     private readonly record struct MainMenuLayout(
         int OptionsTop,
